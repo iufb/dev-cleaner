@@ -27,15 +27,12 @@ enum Cleaner {
         }
     }
 
-    /// Папки, которые нельзя удалять ни при каких условиях.
-    private static let protectedPaths: Set<String> = {
-        let home = NSHomeDirectory()
-        return Set([
-            "", "/Library", "/Documents", "/Desktop", "/Downloads", "/Movies", "/Music",
-            "/Pictures", "/Developer", "/Library/Application Support", "/Library/Caches",
-            "/Library/Developer", "/.ssh", "/.config", "/.claude",
-        ].map { home + $0 })
-    }()
+    /// Папки внутри домашней, которые нельзя удалять ни при каких условиях.
+    static let protectedRelativePaths: [String] = [
+        "", "/Library", "/Documents", "/Desktop", "/Downloads", "/Movies", "/Music",
+        "/Pictures", "/Developer", "/Library/Application Support", "/Library/Caches",
+        "/Library/Developer", "/.ssh", "/.config", "/.claude",
+    ]
 
     static func clean(_ target: CleanupTarget, useTrash: Bool) async throws -> String {
         switch target.action {
@@ -53,12 +50,19 @@ enum Cleaner {
         }
     }
 
-    static func remove(_ urls: [URL], contentsOnly: Bool = false, useTrash: Bool) throws -> Result {
+    /// - Parameter home: домашняя папка, внутри которой разрешено удалять.
+    ///   Подменяется в тестах на временную папку.
+    static func remove(
+        _ urls: [URL],
+        contentsOnly: Bool = false,
+        useTrash: Bool,
+        home: URL = URL(fileURLWithPath: NSHomeDirectory())
+    ) throws -> Result {
         let fm = FileManager.default
         var items: [URL] = []
 
         for url in urls where fm.fileExists(atPath: url.path) {
-            try assertSafe(url)
+            try assertSafe(url, home: home)
             if contentsOnly {
                 let children = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
                 items.append(contentsOf: children)
@@ -90,10 +94,11 @@ enum Cleaner {
     }
 
     /// Удаляем только внутри домашней папки и никогда — её «корневые» каталоги.
-    private static func assertSafe(_ url: URL) throws {
+    static func assertSafe(_ url: URL, home: URL) throws {
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        let home = NSHomeDirectory()
-        guard path.hasPrefix(home + "/"), !protectedPaths.contains(path) else {
+        let home = home.standardizedFileURL.resolvingSymlinksInPath().path
+        let protected = Set(protectedRelativePaths.map { home + $0 })
+        guard path.hasPrefix(home + "/"), !protected.contains(path) else {
             throw CleanError.unsafePath(path)
         }
     }
