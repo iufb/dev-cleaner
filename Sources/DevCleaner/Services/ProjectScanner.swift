@@ -61,7 +61,35 @@ enum ProjectScanner {
         Rule("Rust/Maven target", "target", markers: ["Cargo.toml", "pom.xml"]),
         Rule("Python venv", ".venv", markers: pythonMarkers),
         Rule("Python venv", "venv", markers: pythonMarkers),
+
+        // Python: кэши лежат рядом с .py-файлами или в корне проекта.
+        Rule("Python __pycache__", "__pycache__", markers: ["*.py"]),
+        Rule("pytest cache", ".pytest_cache", markers: pythonToolMarkers),
+        Rule("mypy cache", ".mypy_cache", markers: pythonToolMarkers),
+        Rule("Ruff cache", ".ruff_cache", markers: pythonToolMarkers),
+        Rule("tox", ".tox", markers: ["tox.ini"] + pythonMarkers),
+
+        // JS-фреймворки.
+        Rule("Nuxt 3 .output", ".output", markers: ["nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs"]),
+        Rule("Vercel", ".vercel", markers: ["vercel.json", "package.json"]),
+        Rule("Docusaurus", ".docusaurus", markers: ["docusaurus.config.js", "docusaurus.config.ts", "docusaurus.config.mjs"]),
+        Rule("Yarn Berry cache", ".yarn/cache", markers: [".yarnrc.yml"]),
+
+        // Прочее.
+        Rule("Zig cache", ".zig-cache", markers: ["build.zig"]),
+        Rule("Zig cache", "zig-cache", markers: ["build.zig"]),
+        Rule("Elixir _build", "_build", markers: ["mix.exs"]),
+        Rule("Elixir deps", "deps", markers: ["mix.exs"]),
+        Rule("CMake (CLion)", "cmake-build-*", markers: ["CMakeLists.txt"]),
+        Rule(".NET bin", "bin", markers: dotnetMarkers),
+        Rule(".NET obj", "obj", markers: dotnetMarkers),
     ]
+
+    static let pythonToolMarkers = pythonMarkers + [
+        "pytest.ini", "tox.ini", "mypy.ini", ".mypy.ini", "ruff.toml", ".ruff.toml", "conftest.py", "*.py",
+    ]
+
+    static let dotnetMarkers = ["*.csproj", "*.fsproj", "*.vbproj", "*.sln"]
 
     static let pythonMarkers = [
         "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "uv.lock", "poetry.lock",
