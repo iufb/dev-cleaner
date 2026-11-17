@@ -142,9 +142,54 @@ enum ProjectScanner {
             url: candidate.url,
             kind: candidate.rule.label,
             size: SizeCalculator.size(of: candidate.url),
-            lastTouched: (try? candidate.project.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate ?? .distantPast
+            lastTouched: lastActivity(of: candidate.project)
         )
+    }
+
+    /// Имена папок, которые не считаются работой над проектом: артефакты и VCS.
+    private static let inactiveNames: Set<String> = {
+        var names = skippedNames
+        for rule in rules {
+            if let first = rule.components.first, !first.hasSuffix("*") { names.insert(first) }
+        }
+        return names
+    }()
+
+    /// Дата изменения самого свежего файла проекта, без артефактов и `.git`.
+    /// Обход ограничен глубиной и числом файлов, чтобы не тормозить поиск.
+    static func lastActivity(of project: URL, maxDepth: Int = 6, maxFiles: Int = 5000) -> Date {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .contentModificationDateKey]
+        let ownDate = (try? project.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        guard let enumerator = FileManager.default.enumerator(
+            at: project,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsPackageDescendants],
+            errorHandler: { _, _ in true }
+        ) else { return ownDate ?? .distantPast }
+
+        var latest: Date?
+        var files = 0
+        while let url = enumerator.nextObject() as? URL {
+            guard let values = try? url.resourceValues(forKeys: keys) else { continue }
+            if values.isDirectory == true {
+                if inactiveNames.contains(url.lastPathComponent)
+                    || prefixRules.contains(where: { url.lastPathComponent.hasPrefix($0) })
+                    || enumerator.level >= maxDepth {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            guard values.isRegularFile == true, let date = values.contentModificationDate else { continue }
+            if latest.map({ date > $0 }) ?? true { latest = date }
+            files += 1
+            if files >= maxFiles || Task.isCancelled { break }
+        }
+        return latest ?? ownDate ?? .distantPast
+    }
+
+    private static let prefixRules: [String] = rules.compactMap { rule in
+        guard let first = rule.components.first, first.hasSuffix("*") else { return nil }
+        return String(first.dropLast())
     }
 
     struct Candidate: Sendable {

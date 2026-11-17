@@ -6,7 +6,7 @@ struct ProjectArtifact: Identifiable, Hashable, Sendable {
     let url: URL
     let kind: String
     let size: Int64
-    /// Когда в последний раз менялась папка проекта (приблизительная «активность»).
+    /// Когда последний раз менялся какой-нибудь файл проекта (без артефактов и `.git`).
     let lastTouched: Date
 
     var projectURL: URL { url.deletingLastPathComponent() }
