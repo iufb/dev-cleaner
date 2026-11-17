@@ -161,7 +161,7 @@ struct LogView: View {
                             .foregroundStyle(entry.ok ? .green : .red)
                         Text(entry.text).textSelection(.enabled)
                         Spacer()
-                        Text(entry.date, style: .time)
+                        Text(entry.date, format: .dateTime.day().month().hour().minute())
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -169,5 +169,12 @@ struct LogView: View {
             }
         }
         .navigationTitle("Журнал")
+        .toolbar {
+            ToolbarItem {
+                Button("Очистить журнал", systemImage: "trash.slash") { store.clearLog() }
+                    .disabled(store.log.isEmpty)
+                    .help("Удалить все записи журнала")
+            }
+        }
     }
 }

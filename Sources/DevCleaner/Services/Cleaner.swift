@@ -2,6 +2,12 @@ import Foundation
 
 enum Cleaner {
     enum CleanError: LocalizedError {
+        /// Тексты отдельных ошибок, если они есть (для журнала).
+        var details: [String] {
+            if case .nothingRemoved(let errors) = self { return errors }
+            return []
+        }
+
         case unsafePath(String)
         case nothingRemoved([String])
         case unreadable(String, String)
@@ -11,7 +17,7 @@ enum Cleaner {
             case .unsafePath(let path):
                 "отказ: путь \(path) защищён"
             case .nothingRemoved(let errors):
-                "ничего не удалено. " + errors.prefix(3).joined(separator: "; ")
+                "ничего не удалено, ошибок: \(errors.count)"
             case .unreadable(let path, let reason):
                 "не удалось прочитать \(path): \(reason). Возможно, нужен Полный доступ к диску"
             }
@@ -56,12 +62,18 @@ enum Cleaner {
         "/Library/Developer", "/.ssh", "/.config", "/.claude",
     ]
 
-    static func clean(_ target: CleanupTarget, useTrash: Bool) async throws -> String {
+    /// Итог очистки одной цели: строка для журнала и тексты всех ошибок.
+    struct Outcome: Sendable {
+        var summary: String
+        var errors: [String] = []
+    }
+
+    static func clean(_ target: CleanupTarget, useTrash: Bool) async throws -> Outcome {
         switch target.action {
         case .command(let command):
             let output = try await Shell.run(command)
             let lastLine = output.split(separator: "\n").last.map(String.init) ?? ""
-            return lastLine.isEmpty ? "выполнено" : lastLine
+            return Outcome(summary: lastLine.isEmpty ? "выполнено" : lastLine)
 
         case .delete(let contentsOnly):
             let urls = target.urls
@@ -69,7 +81,7 @@ enum Cleaner {
             let result = try await Task.detached(priority: .userInitiated) {
                 try remove(urls, contentsOnly: contentsOnly, useTrash: trash)
             }.value
-            return result.summary
+            return Outcome(summary: result.summary, errors: result.errors)
         }
     }
 

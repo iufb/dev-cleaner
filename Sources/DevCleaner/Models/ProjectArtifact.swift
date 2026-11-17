@@ -47,9 +47,9 @@ struct DiskInfo: Sendable {
     }
 }
 
-struct LogEntry: Identifiable {
-    let id = UUID()
-    let date = Date()
+struct LogEntry: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var date = Date()
     let text: String
     let ok: Bool
 }

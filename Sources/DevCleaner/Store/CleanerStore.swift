@@ -19,19 +19,39 @@ final class CleanerStore {
     var selection: Set<String> = []
     var isCleaning = false
     var cleaningTargetID: String?
-    var useTrash = false
+    var useTrash = false {
+        didSet { settings.useTrash = useTrash }
+    }
     var disk: DiskInfo? = DiskInfo.current()
     var hasFullDiskAccess = true
-    var log: [LogEntry] = []
+    var log: [LogEntry] = [] {
+        didSet { logFile.save(log) }
+    }
 
     // MARK: Проекты
 
-    var projectRoot: URL = ProjectScanner.defaultRoot()
+    var projectRoot: URL = ProjectScanner.defaultRoot() {
+        didSet { settings.projectRoot = projectRoot }
+    }
     var artifacts: [ProjectArtifact] = []
     var projectSelection: Set<URL> = []
     var isScanningProjects = false
     var didScanProjects = false
-    var minAgeDays = 30
+    var minAgeDays = 30 {
+        didSet { settings.minAgeDays = minAgeDays }
+    }
+
+    @ObservationIgnored private let settings: Settings
+    @ObservationIgnored private let logFile: LogFile
+
+    init(defaults: UserDefaults = .standard, logFile: LogFile = .standard) {
+        self.settings = Settings(defaults: defaults)
+        self.logFile = logFile
+        if let root = settings.projectRoot { projectRoot = root }
+        if let days = settings.minAgeDays { minAgeDays = days }
+        useTrash = settings.useTrash
+        log = logFile.load()
+    }
 
     var isBusy: Bool { isCleaning || !scanning.isEmpty || isScanningProjects }
 
@@ -122,10 +142,11 @@ final class CleanerStore {
         for target in chosen {
             cleaningTargetID = target.id
             do {
-                let message = try await Cleaner.clean(target, useTrash: trash)
-                addLog("\(target.name): \(message)", ok: true)
+                let outcome = try await Cleaner.clean(target, useTrash: trash)
+                addLog("\(target.name): \(outcome.summary)", ok: outcome.errors.isEmpty)
+                for error in outcome.errors { addLog("\(target.name): \(error)", ok: false) }
             } catch {
-                addLog("\(target.name): \(error.localizedDescription)", ok: false)
+                logFailure(error, prefix: target.name)
             }
         }
 
@@ -172,9 +193,9 @@ final class CleanerStore {
                 try Cleaner.remove(urls, useTrash: trash)
             }.value
             addLog("Проекты: \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
-            for error in result.errors { addLog(error, ok: false) }
+            for error in result.errors { addLog("Проекты: \(error)", ok: false) }
         } catch {
-            addLog("Проекты: \(error.localizedDescription)", ok: false)
+            logFailure(error, prefix: "Проекты")
         }
 
         addLog(Cleaner.totalLine(freeBefore: before, freeAfter: DiskInfo.freeBytes(), useTrash: trash), ok: true)
@@ -186,7 +207,19 @@ final class CleanerStore {
         isCleaning = false
     }
 
-    private func addLog(_ text: String, ok: Bool) {
+    private func logFailure(_ error: Error, prefix: String) {
+        addLog("\(prefix): \(error.localizedDescription)", ok: false)
+        for detail in (error as? Cleaner.CleanError)?.details ?? [] {
+            addLog("\(prefix): \(detail)", ok: false)
+        }
+    }
+
+    func addLog(_ text: String, ok: Bool) {
         log.insert(LogEntry(text: text, ok: ok), at: 0)
+        if log.count > LogFile.limit { log.removeLast(log.count - LogFile.limit) }
+    }
+
+    func clearLog() {
+        log.removeAll()
     }
 }
