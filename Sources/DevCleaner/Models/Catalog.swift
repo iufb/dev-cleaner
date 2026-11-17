@@ -3,7 +3,7 @@ import Foundation
 /// Список известных мест, где копится мусор при разработке.
 /// Чтобы добавить свою цель, допишите элемент в нужный массив.
 enum Catalog {
-    static let all: [CleanupTarget] = mobile + web + agents + system
+    static let all: [CleanupTarget] = mobile + web + languages + agents + system
 
     // MARK: - Мобильная разработка
 
@@ -84,6 +84,25 @@ enum Catalog {
               category: .mobile,
               paths: ["~/.konan"],
               risk: .caution),
+        .init(id: "jetbrains.cache", name: "Кэши JetBrains",
+              detail: "Индексы и кэши IntelliJ IDEA, Fleet, PyCharm и других IDE. Пересоздадутся при открытии проекта.",
+              category: .mobile,
+              paths: ["~/Library/Caches/JetBrains"]),
+        .init(id: "androidstudio.cache", name: "Кэши Android Studio",
+              detail: "Индексы и кэши всех версий Android Studio. Пересоздадутся при открытии проекта.",
+              category: .mobile,
+              paths: ["~/Library/Caches/Google/AndroidStudio*"]),
+        .init(id: "android.systemimages", name: "Образы эмуляторов Android SDK",
+              detail: "System images для AVD. Без них эмуляторы не запустятся, скачивать заново долго.",
+              category: .mobile,
+              paths: ["~/Library/Android/sdk/system-images"],
+              risk: .caution),
+        .init(id: "sim.runtimes", name: "Рантаймы симуляторов iOS",
+              detail: "Удаляет рантаймы симуляторов, которыми не пользовались 90 дней. Скачивать заново — гигабайты.",
+              category: .mobile,
+              paths: [],
+              action: .command("xcrun simctl runtime delete --notUsedSinceDays 90"),
+              risk: .caution),
     ]
 
     // MARK: - Веб
@@ -142,6 +161,44 @@ enum Catalog {
               paths: [],
               action: .command("docker system prune -af"),
               risk: .caution),
+        .init(id: "orbstack", name: "OrbStack: неиспользуемое",
+              detail: "То же для Docker внутри OrbStack: остановленные контейнеры, образы и build cache. Тома не трогает. OrbStack должен быть запущен.",
+              category: .web,
+              paths: [],
+              action: .command("docker --context orbstack system prune -af"),
+              risk: .caution,
+              requires: "orbctl"),
+    ]
+
+    // MARK: - Другие языки
+
+    static let languages: [CleanupTarget] = [
+        .init(id: "cargo.registry", name: "Cargo registry",
+              detail: "Скачанные крейты и индекс crates.io. Cargo скачает заново при сборке.",
+              category: .languages,
+              paths: ["~/.cargo/registry"]),
+        .init(id: "rustup.toolchains", name: "Тулчейны rustup",
+              detail: "Все установленные версии Rust. После удаления придётся заново ставить `rustup toolchain install`.",
+              category: .languages,
+              paths: ["~/.rustup/toolchains"],
+              risk: .caution),
+        .init(id: "go.modcache", name: "Go module cache",
+              detail: "Скачанные модули Go. Файлы в нём только для чтения, поэтому чистится командой.",
+              category: .languages,
+              paths: ["~/go/pkg/mod"],
+              action: .command("go clean -modcache")),
+        .init(id: "go.build", name: "Go build cache",
+              detail: "Кэш компиляции Go. Аналог `go clean -cache`.",
+              category: .languages,
+              paths: ["~/Library/Caches/go-build"]),
+        .init(id: "maven", name: "Maven repository",
+              detail: "Локальный репозиторий зависимостей Maven. Скачается заново при сборке.",
+              category: .languages,
+              paths: ["~/.m2/repository"]),
+        .init(id: "nuget", name: "NuGet packages",
+              detail: "Глобальная папка пакетов NuGet. Восстановится при `dotnet restore`.",
+              category: .languages,
+              paths: ["~/.nuget/packages"]),
     ]
 
     // MARK: - AI и агенты
@@ -184,6 +241,24 @@ enum Catalog {
               category: .agents,
               paths: ["~/.claude/projects"],
               risk: .caution),
+        .init(id: "codex.sessions", name: "Сессии Codex",
+              detail: "История диалогов Codex CLI. После удаления старые сессии нельзя будет продолжить.",
+              category: .agents,
+              paths: ["~/.codex/sessions", "~/.codex/archived_sessions"],
+              risk: .caution),
+        .init(id: "gemini.tmp", name: "Временные файлы Gemini CLI",
+              detail: "Временные файлы и снимки сессий Gemini CLI.",
+              category: .agents,
+              paths: ["~/.gemini/tmp"]),
+        .init(id: "claude.desktop.vm", name: "VM-бандлы Claude Desktop",
+              detail: "Образы виртуальной машины Claude Desktop. Скачаются заново, когда понадобятся.",
+              category: .agents,
+              paths: ["~/Library/Application Support/Claude/vm_bundles"]),
+        .init(id: "whisper", name: "Модели Whisper",
+              detail: "Скачанные модели распознавания речи openai-whisper.",
+              category: .agents,
+              paths: ["~/.cache/whisper"],
+              risk: .caution),
         .init(id: "vscode.cache", name: "Кэши VS Code",
               detail: "Кэш Electron, скомпилированный код, VSIX и логи.",
               category: .agents,
@@ -208,11 +283,12 @@ enum Catalog {
               category: .system,
               paths: ["~/Library/Logs"]),
         .init(id: "trash", name: "Корзина",
-              detail: "Очищает корзину безвозвратно. Нужен Полный доступ к диску.",
+              detail: "Очищает корзину безвозвратно, даже в режиме «В Корзину». Нужен Полный доступ к диску.",
               category: .system,
               paths: ["~/.Trash"],
               action: .delete(contentsOnly: true),
-              risk: .caution),
+              risk: .caution,
+              alwaysPermanent: true),
         .init(id: "ios.backups", name: "Бэкапы iPhone/iPad",
               detail: "Локальные резервные копии устройств. Нужен Полный доступ к диску.",
               category: .system,

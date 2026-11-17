@@ -29,16 +29,39 @@ struct ProjectsView: View {
 
                 Spacer()
 
-                Button {
-                    Task { await store.scanProjects() }
-                } label: {
-                    Label("Найти", systemImage: "magnifyingglass")
+                if store.isScanningProjects {
+                    Button {
+                        store.cancelProjectScan()
+                    } label: {
+                        Label("Остановить", systemImage: "stop.circle")
+                    }
                 }
-                .disabled(store.isBusy)
+
+                Button {
+                    store.scanProjects()
+                } label: {
+                    Label(store.isScanningProjects ? "Заново" : "Найти", systemImage: "magnifyingglass")
+                }
+                .help(store.isScanningProjects ? "Отменить текущий поиск и начать заново" : "Искать артефакты сборки")
+                .disabled(store.isCleaning)
             }
             .padding()
 
             Divider()
+
+            if store.isScanningProjects {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Ищу… найдено \(store.artifacts.count) · \(Format.bytes(store.foundSize))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .font(.callout)
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                Divider()
+            }
 
             content
 
@@ -57,26 +80,33 @@ struct ProjectsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .disabled(store.selectedArtifacts.isEmpty || store.isBusy)
+                .disabled(store.selectedArtifacts.isEmpty || store.isCleaning || store.isScanningProjects)
             }
             .padding()
         }
         .navigationTitle("Артефакты сборки")
-        .confirmationDialog(
-            "Удалить \(store.selectedArtifacts.count) папок?",
-            isPresented: $confirmDelete
-        ) {
-            Button("Удалить", role: .destructive) {
+        .sheet(isPresented: $confirmDelete) {
+            ConfirmationSheet(
+                title: "Удалить \(store.selectedArtifacts.count) папок?",
+                groups: [.init(title: "Артефакты сборки", rows: store.selectedArtifacts.map { artifact in
+                    ConfirmationSheet.Row(
+                        id: artifact.url.path,
+                        title: "\(artifact.projectName) · \(artifact.kind)",
+                        subtitle: artifact.url.path,
+                        size: Format.bytes(artifact.size)
+                    )
+                })],
+                notes: ["node_modules, Pods, build и подобное восстанавливаются командами npm install, pod install или сборкой проекта."],
+                confirmTitle: "Удалить \(Format.bytes(store.selectedArtifacts.reduce(0) { $0 + $1.size }))"
+            ) {
                 Task { await store.deleteSelectedArtifacts() }
             }
-        } message: {
-            Text("node_modules, Pods, build и подобное восстанавливаются командами npm install, pod install или сборкой проекта.")
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if store.isScanningProjects {
+        if store.isScanningProjects && store.artifacts.isEmpty {
             ProgressView("Ищу node_modules, Pods, build, target, .venv…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !store.didScanProjects {
@@ -85,9 +115,9 @@ struct ProjectsView: View {
             } description: {
                 Text("Например ~/Developer или ~/Projects. Поиск по всей домашней папке тоже работает, но займёт больше времени.")
             } actions: {
-                Button("Найти") { Task { await store.scanProjects() } }
+                Button("Найти") { store.scanProjects() }
             }
-        } else if store.filteredArtifacts.isEmpty {
+        } else if store.filteredArtifacts.isEmpty && !store.isScanningProjects {
             ContentUnavailableView("Ничего не найдено",
                                    systemImage: "checkmark.circle",
                                    description: Text("Попробуйте другой фильтр по возрасту или другую папку."))
@@ -132,9 +162,7 @@ struct ProjectsView: View {
         panel.directoryURL = store.projectRoot
         panel.prompt = "Выбрать"
         if panel.runModal() == .OK, let url = panel.url {
-            store.projectRoot = url
-            store.didScanProjects = false
-            store.artifacts = []
+            store.setProjectRoot(url)
         }
     }
 }
@@ -154,7 +182,7 @@ struct LogView: View {
                             .foregroundStyle(entry.ok ? .green : .red)
                         Text(entry.text).textSelection(.enabled)
                         Spacer()
-                        Text(entry.date, style: .time)
+                        Text(entry.date, format: .dateTime.day().month().hour().minute())
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -162,5 +190,12 @@ struct LogView: View {
             }
         }
         .navigationTitle("Журнал")
+        .toolbar {
+            ToolbarItem {
+                Button("Очистить журнал", systemImage: "trash.slash") { store.clearLog() }
+                    .disabled(store.log.isEmpty)
+                    .help("Удалить все записи журнала")
+            }
+        }
     }
 }

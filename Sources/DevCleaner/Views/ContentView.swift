@@ -75,7 +75,7 @@ struct ContentView: View {
                     Label("Пересчитать", systemImage: "arrow.clockwise")
                 }
                 .help("Пересчитать размеры")
-                .disabled(store.isBusy)
+                .disabled(store.isCacheBusy)
 
                 Toggle(isOn: $store.useTrash) {
                     Label("В Корзину", systemImage: "trash")
@@ -85,25 +85,53 @@ struct ContentView: View {
                 Button {
                     confirmClean = true
                 } label: {
-                    Label("Очистить \(Format.bytes(store.selectedSize))", systemImage: "sparkles")
+                    Label(Format.cleanTitle(count: store.selection.count, size: store.selectedSize), systemImage: "sparkles")
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.selection.isEmpty || store.isBusy)
+                .disabled(store.selection.isEmpty || store.isCacheBusy)
             }
         }
-        .confirmationDialog(
-            "Очистить выбранное (\(store.selection.count))?",
-            isPresented: $confirmClean
-        ) {
-            Button("Очистить \(Format.bytes(store.selectedSize))", role: .destructive) {
+        .sheet(isPresented: $confirmClean) {
+            ConfirmationSheet(
+                title: "Очистить выбранное (\(store.selection.count))?",
+                groups: confirmationGroups,
+                notes: confirmationNotes,
+                confirmTitle: Format.cleanTitle(count: store.selection.count, size: store.selectedSize)
+            ) {
                 Task { await store.cleanSelected() }
             }
-        } message: {
-            Text(store.useTrash
-                 ? "Файлы будут перемещены в Корзину."
-                 : "Файлы будут удалены безвозвратно. Кэши восстановятся сами при следующей сборке или установке.")
         }
+    }
+}
+
+extension ContentView {
+    fileprivate var confirmationNotes: [String] {
+        var notes = [store.useTrash
+            ? "Файлы будут перемещены в Корзину. Место освободится после её очистки."
+            : "Файлы будут удалены безвозвратно. Безопасные кэши восстановятся сами при следующей сборке или установке."]
+        let permanent = store.selectedTargets.filter(\.alwaysPermanent)
+        if store.useTrash, !permanent.isEmpty {
+            notes.append("«\(permanent.map(\.name).joined(separator: "», «"))» очищается безвозвратно, даже в режиме «В Корзину».")
+        }
+        return notes
+    }
+
+    fileprivate var confirmationGroups: [ConfirmationSheet.Group] {
+        func rows(_ risk: CleanupTarget.Risk) -> [ConfirmationSheet.Row] {
+            store.selectedTargets.filter { $0.risk == risk }.map { target in
+                ConfirmationSheet.Row(
+                    id: target.id,
+                    title: target.name,
+                    subtitle: target.displayLocation,
+                    size: target.paths.isEmpty ? "команда" : Format.bytes(store.size(of: target))
+                )
+            }
+        }
+        return [
+            .init(title: "Осторожно: долго восстанавливать или нельзя восстановить", rows: rows(.caution), warning: true),
+            .init(title: "Безопасно", rows: rows(.safe)),
+        ]
     }
 }
 

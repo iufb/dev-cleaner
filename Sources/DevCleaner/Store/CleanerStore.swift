@@ -7,6 +7,8 @@ final class CleanerStore {
     struct Measurement: Sendable {
         var size: Int64
         var exists: Bool
+        /// Для целей-команд: найден ли нужный инструмент. `nil` — проверка не нужна.
+        var installed: Bool? = nil
     }
 
     // MARK: Кэши
@@ -17,35 +19,61 @@ final class CleanerStore {
     var selection: Set<String> = []
     var isCleaning = false
     var cleaningTargetID: String?
-    var useTrash = false
+    var useTrash = false {
+        didSet { settings.useTrash = useTrash }
+    }
     var disk: DiskInfo? = DiskInfo.current()
-    var log: [LogEntry] = []
+    var hasFullDiskAccess = true
+    var log: [LogEntry] = [] {
+        didSet { logFile.save(log) }
+    }
 
     // MARK: Проекты
 
-    var projectRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+    var projectRoot: URL = ProjectScanner.defaultRoot() {
+        didSet { settings.projectRoot = projectRoot }
+    }
     var artifacts: [ProjectArtifact] = []
     var projectSelection: Set<URL> = []
     var isScanningProjects = false
     var didScanProjects = false
-    var minAgeDays = 30
+    var minAgeDays = 30 {
+        didSet { settings.minAgeDays = minAgeDays }
+    }
+
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanGeneration: UUID?
+    @ObservationIgnored private let settings: Settings
+    @ObservationIgnored private let logFile: LogFile
+
+    init(defaults: UserDefaults = .standard, logFile: LogFile = .standard) {
+        self.settings = Settings(defaults: defaults)
+        self.logFile = logFile
+        if let root = settings.projectRoot { projectRoot = root }
+        if let days = settings.minAgeDays { minAgeDays = days }
+        useTrash = settings.useTrash
+        log = logFile.load()
+    }
 
     var isBusy: Bool { isCleaning || !scanning.isEmpty || isScanningProjects }
+    /// Идёт подсчёт или очистка кэшей (поиск проектов им не мешает).
+    var isCacheBusy: Bool { isCleaning || !scanning.isEmpty }
 
     // MARK: - Подсчёт
 
     func scanAll() async {
-        let measurable = targets.filter { !$0.paths.isEmpty }
-        scanning = Set(measurable.map(\.id))
+        scanning = Set(targets.map(\.id))
 
         await withTaskGroup(of: (String, Measurement).self) { group in
-            for target in measurable {
+            for target in targets {
                 let id = target.id
                 let urls = target.urls
+                let tool = target.requiredTool
                 group.addTask(priority: .utility) {
                     let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
-                    let size = existing.reduce(Int64(0)) { $0 + SizeCalculator.size(of: $1) }
-                    return (id, Measurement(size: size, exists: !existing.isEmpty))
+                    let size = SizeCalculator.size(of: existing)
+                    let installed = tool.map { Shell.which($0) != nil }
+                    return (id, Measurement(size: size, exists: !existing.isEmpty, installed: installed))
                 }
             }
             for await (id, measurement) in group {
@@ -54,10 +82,8 @@ final class CleanerStore {
             }
         }
 
-        if selection.isEmpty {
-            selection = Set(targets.filter { $0.risk == .safe && size(of: $0) > 0 }.map(\.id))
-        }
         disk = DiskInfo.current()
+        hasFullDiskAccess = await Task.detached { FullDiskAccess.isGranted() }.value
     }
 
     func size(of target: CleanupTarget) -> Int64 {
@@ -65,7 +91,12 @@ final class CleanerStore {
     }
 
     func isAvailable(_ target: CleanupTarget) -> Bool {
-        target.isCommand || measurements[target.id]?.exists == true
+        if target.isCommand { return isInstalled(target) }
+        return measurements[target.id]?.exists == true
+    }
+
+    func isInstalled(_ target: CleanupTarget) -> Bool {
+        measurements[target.id]?.installed ?? true
     }
 
     func total(for category: CleanupTarget.Category) -> Int64 {
@@ -76,8 +107,12 @@ final class CleanerStore {
         targets.reduce(0) { $0 + size(of: $1) }
     }
 
+    var selectedTargets: [CleanupTarget] {
+        targets.filter { selection.contains($0.id) }
+    }
+
     var selectedSize: Int64 {
-        targets.filter { selection.contains($0.id) }.reduce(0) { $0 + size(of: $1) }
+        selectedTargets.reduce(0) { $0 + size(of: $1) }
     }
 
     // MARK: - Выбор
@@ -106,47 +141,75 @@ final class CleanerStore {
 
         isCleaning = true
         let trash = useTrash
-        let before = disk?.available ?? 0
+        let before = DiskInfo.freeBytes()
 
         for target in chosen {
             cleaningTargetID = target.id
             do {
-                let message = try await Cleaner.clean(target, useTrash: trash)
-                addLog("\(target.name): \(message)", ok: true)
+                let outcome = try await Cleaner.clean(target, useTrash: trash)
+                addLog("\(target.name): \(outcome.summary)", ok: outcome.errors.isEmpty)
+                for error in outcome.errors { addLog("\(target.name): \(error)", ok: false) }
             } catch {
-                addLog("\(target.name): \(error.localizedDescription)", ok: false)
+                logFailure(error, prefix: target.name)
             }
         }
 
         cleaningTargetID = nil
         selection.removeAll()
         isCleaning = false
+        let after = DiskInfo.freeBytes()
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
         await scanAll()
-
-        if let after = disk?.available, after > before {
-            addLog("Итого на диске стало свободнее на \(Format.bytes(after - before))", ok: true)
-        }
     }
 
     // MARK: - Проекты
 
     var filteredArtifacts: [ProjectArtifact] {
-        artifacts.filter { $0.ageDays >= minAgeDays }
+        artifacts.filter { $0.ageDays >= minAgeDays }.sorted { $0.size > $1.size }
     }
 
     var selectedArtifacts: [ProjectArtifact] {
         filteredArtifacts.filter { projectSelection.contains($0.id) }
     }
 
-    func scanProjects() async {
-        isScanningProjects = true
-        let root = projectRoot
-        artifacts = await Task.detached(priority: .utility) {
-            ProjectScanner.scan(root: root)
-        }.value
-        projectSelection = Set(filteredArtifacts.map(\.id))
+    var foundSize: Int64 { artifacts.reduce(0) { $0 + $1.size } }
+
+    /// Запускает поиск артефактов. Предыдущий поиск, если он идёт, отменяется.
+    func scanProjects() {
+        scanTask?.cancel()
+        let generation = UUID()
+        scanGeneration = generation
+        artifacts = []
+        projectSelection = []
         didScanProjects = true
+        isScanningProjects = true
+
+        let root = projectRoot
+        scanTask = Task { [weak self] in
+            for await artifact in ProjectScanner.stream(root: root) {
+                guard let self, self.scanGeneration == generation else { return }
+                self.artifacts.append(artifact)
+            }
+            guard let self, self.scanGeneration == generation else { return }
+            self.isScanningProjects = false
+            self.scanTask = nil
+        }
+    }
+
+    /// Останавливает поиск. Уже найденное остаётся в таблице.
+    func cancelProjectScan() {
+        scanTask?.cancel()
+        scanTask = nil
+        scanGeneration = nil
         isScanningProjects = false
+    }
+
+    func setProjectRoot(_ url: URL) {
+        cancelProjectScan()
+        projectRoot = url
+        didScanProjects = false
+        artifacts = []
+        projectSelection = []
     }
 
     func deleteSelectedArtifacts() async {
@@ -156,16 +219,19 @@ final class CleanerStore {
         isCleaning = true
         let urls = chosen.map(\.url)
         let trash = useTrash
+        let before = DiskInfo.freeBytes()
 
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try Cleaner.remove(urls, useTrash: trash)
             }.value
-            addLog("Проекты: удалено \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
-            for error in result.errors { addLog(error, ok: false) }
+            addLog("Проекты: \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
+            for error in result.errors { addLog("Проекты: \(error)", ok: false) }
         } catch {
-            addLog("Проекты: \(error.localizedDescription)", ok: false)
+            logFailure(error, prefix: "Проекты")
         }
+
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: DiskInfo.freeBytes(), useTrash: trash), ok: true)
 
         let removed = Set(urls.filter { !FileManager.default.fileExists(atPath: $0.path) })
         artifacts.removeAll { removed.contains($0.url) }
@@ -174,7 +240,19 @@ final class CleanerStore {
         isCleaning = false
     }
 
-    private func addLog(_ text: String, ok: Bool) {
+    private func logFailure(_ error: Error, prefix: String) {
+        addLog("\(prefix): \(error.localizedDescription)", ok: false)
+        for detail in (error as? Cleaner.CleanError)?.details ?? [] {
+            addLog("\(prefix): \(detail)", ok: false)
+        }
+    }
+
+    func addLog(_ text: String, ok: Bool) {
         log.insert(LogEntry(text: text, ok: ok), at: 0)
+        if log.count > LogFile.limit { log.removeLast(log.count - LogFile.limit) }
+    }
+
+    func clearLog() {
+        log.removeAll()
     }
 }

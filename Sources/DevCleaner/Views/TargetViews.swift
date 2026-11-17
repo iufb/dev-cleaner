@@ -11,6 +11,25 @@ struct TargetListView: View {
 
     var body: some View {
         List {
+            if category == .system && !store.hasFullDiskAccess {
+                Section {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "lock.shield")
+                            .font(.title2)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Нет Полного доступа к диску").font(.headline)
+                            Text("Без него нельзя очистить Корзину и бэкапы iPhone. Включите DevCleaner в Системных настройках и перезапустите приложение.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button("Открыть настройки") { FullDiskAccess.openSettings() }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
             Section {
                 ForEach(items) { TargetRow(target: $0) }
             } header: {
@@ -100,6 +119,9 @@ struct TargetRow: View {
             ProgressView().controlSize(.small)
         } else if store.scanning.contains(target.id) {
             ProgressView().controlSize(.small)
+        } else if !store.isInstalled(target) {
+            Text("не установлено").foregroundStyle(.tertiary)
+                .help("\(target.requiredTool ?? "Инструмент") не найден в PATH")
         } else if target.paths.isEmpty {
             Text("—").foregroundStyle(.secondary)
         } else if store.measurements[target.id]?.exists == true {

@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "DevCleaner",
             path: "Sources/DevCleaner"
-        )
+        ),
+        .testTarget(
+            name: "DevCleanerTests",
+            dependencies: ["DevCleaner"],
+            path: "Tests/DevCleanerTests"
+        ),
     ]
 )
