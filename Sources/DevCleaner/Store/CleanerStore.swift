@@ -23,7 +23,7 @@ final class CleanerStore {
 
     // MARK: Проекты
 
-    var projectRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+    var projectRoot: URL = ProjectScanner.defaultRoot()
     var artifacts: [ProjectArtifact] = []
     var projectSelection: Set<URL> = []
     var isScanningProjects = false

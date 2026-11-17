@@ -1,14 +1,15 @@
 import Foundation
+@testable import DevCleaner
 
 /// Временная папка, которая удаляется после теста.
 final class TempDir {
-    let url: URL
+    private(set) var url: URL
 
     init() throws {
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent("DevCleanerTests-\(UUID().uuidString)")
-            .resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        url = URL(fileURLWithPath: Paths.canonical(url), isDirectory: true)
     }
 
     deinit { try? FileManager.default.removeItem(at: url) }

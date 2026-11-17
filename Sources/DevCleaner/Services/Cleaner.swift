@@ -95,8 +95,8 @@ enum Cleaner {
 
     /// Удаляем только внутри домашней папки и никогда — её «корневые» каталоги.
     static func assertSafe(_ url: URL, home: URL) throws {
-        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        let home = home.standardizedFileURL.resolvingSymlinksInPath().path
+        let path = Paths.canonical(url)
+        let home = Paths.canonical(home)
         let protected = Set(protectedRelativePaths.map { home + $0 })
         guard path.hasPrefix(home + "/"), !protected.contains(path) else {
             throw CleanError.unsafePath(path)

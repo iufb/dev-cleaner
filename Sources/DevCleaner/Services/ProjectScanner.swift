@@ -4,93 +4,177 @@ import Foundation
 enum ProjectScanner {
     struct Rule: Sendable {
         let label: String
-        /// Файлы-маркеры рядом с папкой. Пусто — подходит всегда.
+        /// Путь артефакта относительно проекта: `node_modules`, `.yarn/cache`.
+        /// Последний компонент может заканчиваться на `*` (`cmake-build-*`).
+        let pattern: String
+        /// Файлы-маркеры в папке проекта. Поддерживается `*.ext`.
+        /// Хотя бы один должен быть, иначе это не проект нужного типа.
         let markers: [String]
+
+        init(_ label: String, _ pattern: String, markers: [String]) {
+            precondition(!markers.isEmpty, "у правила \(pattern) должен быть маркер")
+            self.label = label
+            self.pattern = pattern
+            self.markers = markers
+        }
+
+        var components: [String] { pattern.split(separator: "/").map(String.init) }
+
+        /// Если `url` — артефакт этого правила, возвращает папку проекта.
+        func project(for url: URL) -> URL? {
+            let parts = components
+            let tail = url.pathComponents.suffix(parts.count)
+            guard tail.count == parts.count else { return nil }
+            for (name, pattern) in zip(tail, parts) {
+                if pattern.hasSuffix("*") {
+                    guard name.hasPrefix(pattern.dropLast()) else { return nil }
+                } else if name != pattern {
+                    return nil
+                }
+            }
+            var project = url
+            for _ in parts { project.deleteLastPathComponent() }
+            return project
+        }
     }
 
     private static let gradleMarkers = [
         "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
     ]
 
-    static let rules: [String: Rule] = [
-        "node_modules": Rule(label: "node_modules", markers: []),
-        ".next": Rule(label: "Next.js", markers: []),
-        ".nuxt": Rule(label: "Nuxt", markers: []),
-        ".svelte-kit": Rule(label: "SvelteKit", markers: []),
-        ".turbo": Rule(label: "Turborepo", markers: []),
-        ".parcel-cache": Rule(label: "Parcel", markers: []),
-        ".expo": Rule(label: "Expo", markers: []),
-        ".angular": Rule(label: "Angular cache", markers: []),
-        "Pods": Rule(label: "CocoaPods", markers: ["Podfile"]),
-        ".build": Rule(label: "SwiftPM .build", markers: ["Package.swift"]),
-        "DerivedData": Rule(label: "Xcode DerivedData", markers: []),
-        ".gradle": Rule(label: "Gradle", markers: gradleMarkers),
-        "build": Rule(label: "build (Gradle/Flutter)", markers: gradleMarkers + ["pubspec.yaml"]),
-        ".dart_tool": Rule(label: "Dart tool", markers: ["pubspec.yaml"]),
-        ".cxx": Rule(label: "Android NDK", markers: gradleMarkers),
-        "target": Rule(label: "Rust/Maven target", markers: ["Cargo.toml", "pom.xml"]),
-        ".venv": Rule(label: "Python venv", markers: []),
-        "venv": Rule(label: "Python venv", markers: ["requirements.txt", "pyproject.toml"]),
+    static let rules: [Rule] = [
+        Rule("node_modules", "node_modules", markers: ["package.json"]),
+        Rule("Next.js", ".next", markers: ["package.json"]),
+        Rule("Nuxt", ".nuxt", markers: ["package.json"]),
+        Rule("SvelteKit", ".svelte-kit", markers: ["package.json"]),
+        Rule("Turborepo", ".turbo", markers: ["package.json", "turbo.json"]),
+        Rule("Parcel", ".parcel-cache", markers: ["package.json"]),
+        Rule("Expo", ".expo", markers: ["package.json", "app.json"]),
+        Rule("Angular cache", ".angular", markers: ["angular.json"]),
+        Rule("CocoaPods", "Pods", markers: ["Podfile"]),
+        Rule("SwiftPM .build", ".build", markers: ["Package.swift"]),
+        Rule("Xcode DerivedData", "DerivedData", markers: ["*.xcodeproj", "*.xcworkspace", "Package.swift"]),
+        Rule("Gradle", ".gradle", markers: gradleMarkers),
+        Rule("build (Gradle/Flutter)", "build", markers: gradleMarkers + ["pubspec.yaml"]),
+        Rule("Dart tool", ".dart_tool", markers: ["pubspec.yaml"]),
+        Rule("Android NDK", ".cxx", markers: gradleMarkers),
+        Rule("Rust/Maven target", "target", markers: ["Cargo.toml", "pom.xml"]),
+        Rule("Python venv", ".venv", markers: pythonMarkers),
+        Rule("Python venv", "venv", markers: pythonMarkers),
     ]
 
-    /// В эти папки не заходим: там нет проектов, а обход долгий.
-    private static let skipped: Set<String> = [
-        ".git", ".Trash", "Library", "Applications", ".cache", ".npm", ".pnpm-store",
-        ".cargo", ".rustup", ".bun", ".ollama", ".docker", ".android", ".pub-cache",
-        ".konan", ".lmstudio", ".vscode", ".cursor",
+    static let pythonMarkers = [
+        "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "uv.lock", "poetry.lock",
     ]
 
-    static func scan(root: URL) -> [ProjectArtifact] {
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
+    /// Имена папок, в которые не заходим нигде.
+    private static let skippedNames: Set<String> = [".git", ".hg", ".svn"]
 
-        guard let enumerator = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: keys,
-            options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in true }
-        ) else { return [] }
+    /// Папки инструментов и данных в домашней папке. Там нет проектов, зато есть
+    /// глобальные пакеты (`~/.nvm/.../node_modules`, расширения Raycast), удаление
+    /// которых ломает CLI, LSP и расширения.
+    static let skippedInHome: [String] = [
+        "Library", "Applications", ".Trash", ".cache", ".local", ".config",
+        ".npm", ".pnpm-store", ".yarn", ".bun", ".deno", ".nvm", ".volta", ".fnm", ".nodenv",
+        ".cargo", ".rustup", "go", ".m2", ".gradle", ".nuget", ".dotnet", ".pyenv", ".rbenv",
+        ".gem", ".sdkman", ".pub-cache", ".konan", ".android", ".docker", ".orbstack", "OrbStack",
+        ".ollama", ".lmstudio", ".vscode", ".cursor", ".claude", ".codex", ".gemini",
+        ".oh-my-zsh", ".tmux", ".zsh", ".vim",
+    ]
 
+    /// Папка поиска по умолчанию: первая существующая из привычных папок с проектами.
+    static func defaultRoot(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        for name in ["Projects", "Developer", "Code"] {
+            let url = home.appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                return url
+            }
+        }
+        return home
+    }
+
+    static func scan(
+        root: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> [ProjectArtifact] {
         var found: [ProjectArtifact] = []
-
-        while let url = enumerator.nextObject() as? URL {
-            guard
-                let values = try? url.resourceValues(forKeys: Set(keys)),
-                values.isDirectory == true,
-                values.isSymbolicLink != true
-            else { continue }
-
-            let name = url.lastPathComponent
-
-            if skipped.contains(name) {
-                enumerator.skipDescendants()
-                continue
-            }
-
-            guard let rule = rules[name] else { continue }
-
-            let project = url.deletingLastPathComponent()
-            if !rule.markers.isEmpty {
-                let hasMarker = rule.markers.contains {
-                    fm.fileExists(atPath: project.appendingPathComponent($0).path)
-                }
-                guard hasMarker else { continue }
-            }
-
-            // Внутрь найденного артефакта не заходим (вложенные node_modules и т.п.).
-            enumerator.skipDescendants()
-
-            let touched = (try? project.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate ?? .distantPast
-
+        var candidates = Candidates(root: root, home: home)
+        while let candidate = candidates.next() {
             found.append(ProjectArtifact(
-                url: url,
-                kind: rule.label,
-                size: SizeCalculator.size(of: url),
-                lastTouched: touched
+                url: candidate.url,
+                kind: candidate.rule.label,
+                size: SizeCalculator.size(of: candidate.url),
+                lastTouched: (try? candidate.project.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
             ))
         }
-
         return found.sorted { $0.size > $1.size }
+    }
+
+    struct Candidate {
+        let url: URL
+        let project: URL
+        let rule: Rule
+    }
+
+    /// Ленивый обход дерева: отдаёт найденные артефакты по одному.
+    struct Candidates: IteratorProtocol {
+        private let enumerator: FileManager.DirectoryEnumerator?
+        private let skippedPaths: Set<String>
+        private let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
+
+        init(root: URL, home: URL) {
+            let home = URL(fileURLWithPath: Paths.canonical(home))
+            skippedPaths = Set(ProjectScanner.skippedInHome.map { home.appendingPathComponent($0).path })
+            enumerator = FileManager.default.enumerator(
+                at: URL(fileURLWithPath: Paths.canonical(root), isDirectory: true),
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            )
+        }
+
+        mutating func next() -> Candidate? {
+            guard let enumerator else { return nil }
+            while let url = enumerator.nextObject() as? URL {
+                guard
+                    let values = try? url.resourceValues(forKeys: Set(keys)),
+                    values.isDirectory == true,
+                    values.isSymbolicLink != true
+                else { continue }
+
+                if ProjectScanner.skippedNames.contains(url.lastPathComponent)
+                    || skippedPaths.contains(url.path) {
+                    enumerator.skipDescendants()
+                    continue
+                }
+
+                for rule in ProjectScanner.rules {
+                    guard let project = rule.project(for: url),
+                          ProjectScanner.hasMarker(rule.markers, in: project)
+                    else { continue }
+                    // Внутрь найденного артефакта не заходим (вложенные node_modules и т.п.).
+                    enumerator.skipDescendants()
+                    return Candidate(url: url, project: project, rule: rule)
+                }
+            }
+            return nil
+        }
+    }
+
+    static func hasMarker(_ markers: [String], in folder: URL) -> Bool {
+        let fm = FileManager.default
+        var listing: [String]?
+        for marker in markers {
+            if marker.hasPrefix("*") {
+                if listing == nil { listing = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] }
+                let suffix = marker.dropFirst()
+                if listing!.contains(where: { $0.hasSuffix(suffix) }) { return true }
+            } else if fm.fileExists(atPath: folder.appendingPathComponent(marker).path) {
+                return true
+            }
+        }
+        return false
     }
 }
