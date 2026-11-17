@@ -36,6 +36,15 @@ struct DiskInfo: Sendable {
         else { return nil }
         return DiskInfo(total: Int64(total), available: available)
     }
+
+    /// Свободное место на томе прямо сейчас, без учёта purgeable.
+    /// По его изменению считается, сколько на самом деле освободила очистка.
+    static func freeBytes() -> Int64? {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        guard let free = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]).volumeAvailableCapacity
+        else { return nil }
+        return Int64(free)
+    }
 }
 
 struct LogEntry: Identifiable {
@@ -48,5 +57,10 @@ struct LogEntry: Identifiable {
 enum Format {
     static func bytes(_ value: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
+
+    /// «Очистить 3,2 ГБ», а если размер неизвестен (только команды) — «Очистить (2)».
+    static func cleanTitle(count: Int, size: Int64) -> String {
+        size > 0 ? "Очистить \(bytes(size))" : "Очистить (\(count))"
     }
 }

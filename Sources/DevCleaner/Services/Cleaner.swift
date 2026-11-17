@@ -19,15 +19,34 @@ enum Cleaner {
     }
 
     struct Result: Sendable {
-        var freed: Int64 = 0
+        /// Сколько занимало удалённое по подсчёту (каждый inode один раз).
+        /// Реально освобождённое место может быть меньше: клоны APFS, ссылки на pnpm store.
+        var size: Int64 = 0
         var removed = 0
         var errors: [String] = []
+        var movedToTrash = false
 
         var summary: String {
-            var text = "освобождено \(Format.bytes(freed))"
+            var text = movedToTrash
+                ? "перемещено в Корзину: \(Format.bytes(size))"
+                : "удалено \(Format.bytes(size))"
             if !errors.isEmpty { text += ", ошибок: \(errors.count)" }
             return text
         }
+    }
+
+    /// Итоговая строка журнала по изменению свободного места на томе.
+    static func totalLine(freeBefore: Int64?, freeAfter: Int64?, useTrash: Bool) -> String {
+        guard let freeBefore, let freeAfter else {
+            return "Итого: не удалось узнать свободное место на диске"
+        }
+        let delta = freeAfter - freeBefore
+        if delta > 0 {
+            return "Итого на диске стало свободнее на \(Format.bytes(delta))"
+        }
+        return useTrash
+            ? "Итого: свободное место не изменилось, оно освободится после очистки Корзины"
+            : "Итого: свободное место на диске почти не изменилось"
     }
 
     /// Папки внутри домашней, которые нельзя удалять ни при каких условиях.
@@ -79,15 +98,17 @@ enum Cleaner {
         }
 
         var result = Result()
+        result.movedToTrash = useTrash
+        var seen = SizeCalculator.Seen()
         for item in items {
-            let size = SizeCalculator.size(of: item)
+            let size = SizeCalculator.size(of: item, seen: &seen)
             do {
                 if useTrash {
                     try fm.trashItem(at: item, resultingItemURL: nil)
                 } else {
                     try fm.removeItem(at: item)
                 }
-                result.freed += size
+                result.size += size
                 result.removed += 1
             } catch {
                 result.errors.append("\(item.lastPathComponent): \(error.localizedDescription)")

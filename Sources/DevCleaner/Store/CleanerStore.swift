@@ -47,7 +47,7 @@ final class CleanerStore {
                 let tool = target.requiredTool
                 group.addTask(priority: .utility) {
                     let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
-                    let size = existing.reduce(Int64(0)) { $0 + SizeCalculator.size(of: $1) }
+                    let size = SizeCalculator.size(of: existing)
                     let installed = tool.map { Shell.which($0) != nil }
                     return (id, Measurement(size: size, exists: !existing.isEmpty, installed: installed))
                 }
@@ -117,7 +117,7 @@ final class CleanerStore {
 
         isCleaning = true
         let trash = useTrash
-        let before = disk?.available ?? 0
+        let before = DiskInfo.freeBytes()
 
         for target in chosen {
             cleaningTargetID = target.id
@@ -132,11 +132,9 @@ final class CleanerStore {
         cleaningTargetID = nil
         selection.removeAll()
         isCleaning = false
+        let after = DiskInfo.freeBytes()
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
         await scanAll()
-
-        if let after = disk?.available, after > before {
-            addLog("Итого на диске стало свободнее на \(Format.bytes(after - before))", ok: true)
-        }
     }
 
     // MARK: - Проекты
@@ -167,16 +165,19 @@ final class CleanerStore {
         isCleaning = true
         let urls = chosen.map(\.url)
         let trash = useTrash
+        let before = DiskInfo.freeBytes()
 
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try Cleaner.remove(urls, useTrash: trash)
             }.value
-            addLog("Проекты: удалено \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
+            addLog("Проекты: \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
             for error in result.errors { addLog(error, ok: false) }
         } catch {
             addLog("Проекты: \(error.localizedDescription)", ok: false)
         }
+
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: DiskInfo.freeBytes(), useTrash: trash), ok: true)
 
         let removed = Set(urls.filter { !FileManager.default.fileExists(atPath: $0.path) })
         artifacts.removeAll { removed.contains($0.url) }

@@ -85,7 +85,7 @@ struct ContentView: View {
                 Button {
                     confirmClean = true
                 } label: {
-                    Label("Очистить \(Format.bytes(store.selectedSize))", systemImage: "sparkles")
+                    Label(Format.cleanTitle(count: store.selection.count, size: store.selectedSize), systemImage: "sparkles")
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
@@ -97,7 +97,7 @@ struct ContentView: View {
                 title: "Очистить выбранное (\(store.selection.count))?",
                 groups: confirmationGroups,
                 notes: confirmationNotes,
-                confirmTitle: "Очистить \(Format.bytes(store.selectedSize))"
+                confirmTitle: Format.cleanTitle(count: store.selection.count, size: store.selectedSize)
             ) {
                 Task { await store.cleanSelected() }
             }
