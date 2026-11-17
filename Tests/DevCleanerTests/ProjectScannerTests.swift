@@ -64,3 +64,37 @@ import Testing
         #expect(ProjectScanner.defaultRoot(home: home).lastPathComponent == "Projects")
     }
 }
+
+@Suite struct ProjectScannerStreamTests {
+    @Test func streamYieldsSameAsSyncScan() async throws {
+        let tmp = try TempDir()
+        for i in 0..<12 {
+            try tmp.file("home/Projects/p\(i)/package.json")
+            try tmp.file("home/Projects/p\(i)/node_modules/x/index.js", bytes: 1000 * (i + 1))
+        }
+        let root = tmp.url.appendingPathComponent("home/Projects")
+        let home = tmp.url.appendingPathComponent("home")
+
+        var streamed: [ProjectArtifact] = []
+        for await a in ProjectScanner.stream(root: root, home: home, concurrency: 3) { streamed.append(a) }
+        let sync = ProjectScanner.scan(root: root, home: home)
+
+        #expect(Set(streamed.map(\.url)) == Set(sync.map(\.url)))
+        #expect(streamed.count == 12)
+    }
+
+    @Test func breakingOutStopsTheScan() async throws {
+        let tmp = try TempDir()
+        for i in 0..<30 {
+            try tmp.file("home/Projects/p\(i)/package.json")
+            try tmp.file("home/Projects/p\(i)/node_modules/x/index.js")
+        }
+        var count = 0
+        for await _ in ProjectScanner.stream(root: tmp.url.appendingPathComponent("home/Projects"),
+                                             home: tmp.url.appendingPathComponent("home")) {
+            count += 1
+            if count == 2 { break }
+        }
+        #expect(count == 2)
+    }
+}

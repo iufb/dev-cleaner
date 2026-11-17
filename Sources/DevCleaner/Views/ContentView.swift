@@ -75,7 +75,7 @@ struct ContentView: View {
                     Label("Пересчитать", systemImage: "arrow.clockwise")
                 }
                 .help("Пересчитать размеры")
-                .disabled(store.isBusy)
+                .disabled(store.isCacheBusy)
 
                 Toggle(isOn: $store.useTrash) {
                     Label("В Корзину", systemImage: "trash")
@@ -89,7 +89,7 @@ struct ContentView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.selection.isEmpty || store.isBusy)
+                .disabled(store.selection.isEmpty || store.isCacheBusy)
             }
         }
         .sheet(isPresented: $confirmClean) {

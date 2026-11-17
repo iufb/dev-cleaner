@@ -94,6 +94,7 @@ enum ProjectScanner {
         return home
     }
 
+    /// Синхронный поиск: все артефакты, отсортированные по размеру.
     static func scan(
         root: URL,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -101,18 +102,52 @@ enum ProjectScanner {
         var found: [ProjectArtifact] = []
         var candidates = Candidates(root: root, home: home)
         while let candidate = candidates.next() {
-            found.append(ProjectArtifact(
-                url: candidate.url,
-                kind: candidate.rule.label,
-                size: SizeCalculator.size(of: candidate.url),
-                lastTouched: (try? candidate.project.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
-            ))
+            found.append(artifact(for: candidate))
         }
         return found.sorted { $0.size > $1.size }
     }
 
-    struct Candidate {
+    /// Поиск с выдачей по ходу. Размеры считаются параллельно (до `concurrency` сразу).
+    /// Прекращение чтения потока или отмена задачи-читателя останавливает обход.
+    static func stream(
+        root: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        concurrency: Int = 6
+    ) -> AsyncStream<ProjectArtifact> {
+        AsyncStream { continuation in
+            let task = Task.detached(priority: .utility) {
+                var candidates = Candidates(root: root, home: home)
+                await withTaskGroup(of: ProjectArtifact?.self) { group in
+                    var running = 0
+                    while !Task.isCancelled, let candidate = candidates.next() {
+                        if running >= concurrency, let done = await group.next() {
+                            running -= 1
+                            if let done { continuation.yield(done) }
+                        }
+                        group.addTask { Task.isCancelled ? nil : artifact(for: candidate) }
+                        running += 1
+                    }
+                    for await done in group {
+                        if let done, !Task.isCancelled { continuation.yield(done) }
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    static func artifact(for candidate: Candidate) -> ProjectArtifact {
+        ProjectArtifact(
+            url: candidate.url,
+            kind: candidate.rule.label,
+            size: SizeCalculator.size(of: candidate.url),
+            lastTouched: (try? candidate.project.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+        )
+    }
+
+    struct Candidate: Sendable {
         let url: URL
         let project: URL
         let rule: Rule

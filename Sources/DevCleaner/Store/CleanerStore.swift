@@ -41,6 +41,8 @@ final class CleanerStore {
         didSet { settings.minAgeDays = minAgeDays }
     }
 
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanGeneration: UUID?
     @ObservationIgnored private let settings: Settings
     @ObservationIgnored private let logFile: LogFile
 
@@ -54,6 +56,8 @@ final class CleanerStore {
     }
 
     var isBusy: Bool { isCleaning || !scanning.isEmpty || isScanningProjects }
+    /// Идёт подсчёт или очистка кэшей (поиск проектов им не мешает).
+    var isCacheBusy: Bool { isCleaning || !scanning.isEmpty }
 
     // MARK: - Подсчёт
 
@@ -161,22 +165,51 @@ final class CleanerStore {
     // MARK: - Проекты
 
     var filteredArtifacts: [ProjectArtifact] {
-        artifacts.filter { $0.ageDays >= minAgeDays }
+        artifacts.filter { $0.ageDays >= minAgeDays }.sorted { $0.size > $1.size }
     }
 
     var selectedArtifacts: [ProjectArtifact] {
         filteredArtifacts.filter { projectSelection.contains($0.id) }
     }
 
-    func scanProjects() async {
-        isScanningProjects = true
-        let root = projectRoot
-        artifacts = await Task.detached(priority: .utility) {
-            ProjectScanner.scan(root: root)
-        }.value
+    var foundSize: Int64 { artifacts.reduce(0) { $0 + $1.size } }
+
+    /// Запускает поиск артефактов. Предыдущий поиск, если он идёт, отменяется.
+    func scanProjects() {
+        scanTask?.cancel()
+        let generation = UUID()
+        scanGeneration = generation
+        artifacts = []
         projectSelection = []
         didScanProjects = true
+        isScanningProjects = true
+
+        let root = projectRoot
+        scanTask = Task { [weak self] in
+            for await artifact in ProjectScanner.stream(root: root) {
+                guard let self, self.scanGeneration == generation else { return }
+                self.artifacts.append(artifact)
+            }
+            guard let self, self.scanGeneration == generation else { return }
+            self.isScanningProjects = false
+            self.scanTask = nil
+        }
+    }
+
+    /// Останавливает поиск. Уже найденное остаётся в таблице.
+    func cancelProjectScan() {
+        scanTask?.cancel()
+        scanTask = nil
+        scanGeneration = nil
         isScanningProjects = false
+    }
+
+    func setProjectRoot(_ url: URL) {
+        cancelProjectScan()
+        projectRoot = url
+        didScanProjects = false
+        artifacts = []
+        projectSelection = []
     }
 
     func deleteSelectedArtifacts() async {

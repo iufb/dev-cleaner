@@ -29,16 +29,39 @@ struct ProjectsView: View {
 
                 Spacer()
 
-                Button {
-                    Task { await store.scanProjects() }
-                } label: {
-                    Label("Найти", systemImage: "magnifyingglass")
+                if store.isScanningProjects {
+                    Button {
+                        store.cancelProjectScan()
+                    } label: {
+                        Label("Остановить", systemImage: "stop.circle")
+                    }
                 }
-                .disabled(store.isBusy)
+
+                Button {
+                    store.scanProjects()
+                } label: {
+                    Label(store.isScanningProjects ? "Заново" : "Найти", systemImage: "magnifyingglass")
+                }
+                .help(store.isScanningProjects ? "Отменить текущий поиск и начать заново" : "Искать артефакты сборки")
+                .disabled(store.isCleaning)
             }
             .padding()
 
             Divider()
+
+            if store.isScanningProjects {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Ищу… найдено \(store.artifacts.count) · \(Format.bytes(store.foundSize))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .font(.callout)
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                Divider()
+            }
 
             content
 
@@ -57,7 +80,7 @@ struct ProjectsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .disabled(store.selectedArtifacts.isEmpty || store.isBusy)
+                .disabled(store.selectedArtifacts.isEmpty || store.isCleaning || store.isScanningProjects)
             }
             .padding()
         }
@@ -83,7 +106,7 @@ struct ProjectsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if store.isScanningProjects {
+        if store.isScanningProjects && store.artifacts.isEmpty {
             ProgressView("Ищу node_modules, Pods, build, target, .venv…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !store.didScanProjects {
@@ -92,9 +115,9 @@ struct ProjectsView: View {
             } description: {
                 Text("Например ~/Developer или ~/Projects. Поиск по всей домашней папке тоже работает, но займёт больше времени.")
             } actions: {
-                Button("Найти") { Task { await store.scanProjects() } }
+                Button("Найти") { store.scanProjects() }
             }
-        } else if store.filteredArtifacts.isEmpty {
+        } else if store.filteredArtifacts.isEmpty && !store.isScanningProjects {
             ContentUnavailableView("Ничего не найдено",
                                    systemImage: "checkmark.circle",
                                    description: Text("Попробуйте другой фильтр по возрасту или другую папку."))
@@ -139,9 +162,7 @@ struct ProjectsView: View {
         panel.directoryURL = store.projectRoot
         panel.prompt = "Выбрать"
         if panel.runModal() == .OK, let url = panel.url {
-            store.projectRoot = url
-            store.didScanProjects = false
-            store.artifacts = []
+            store.setProjectRoot(url)
         }
     }
 }

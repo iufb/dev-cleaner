@@ -44,8 +44,11 @@ enum SizeCalculator {
         ) else { return 0 }
 
         var total: Int64 = 0
+        var count = 0
         while let item = enumerator.nextObject() as? URL {
             total += fileSize(item, seen: &seen)
+            count += 1
+            if count % 4096 == 0, Task.isCancelled { break }
         }
         return total
     }

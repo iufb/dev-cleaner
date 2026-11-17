@@ -62,3 +62,51 @@ import Testing
         #expect(result.errors[0].hasPrefix("locked"))
     }
 }
+
+@MainActor
+@Suite struct ProjectScanStoreTests {
+    private func waitUntilDone(_ store: CleanerStore) async throws {
+        for _ in 0..<500 where store.isScanningProjects {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!store.isScanningProjects)
+    }
+
+    @Test func rescanCancelsPreviousWithoutDuplicates() async throws {
+        let tmp = try TempDir()
+        for i in 0..<20 {
+            try tmp.file("p\(i)/package.json")
+            try tmp.file("p\(i)/node_modules/x/index.js")
+        }
+        let name = "DevCleanerTests-\(UUID().uuidString)"
+        let store = CleanerStore(defaults: UserDefaults(suiteName: name)!,
+                                 logFile: LogFile(url: tmp.url.appendingPathComponent("log.json")))
+        store.projectRoot = tmp.url
+        store.minAgeDays = 0
+
+        store.scanProjects()
+        store.scanProjects()
+        try await waitUntilDone(store)
+
+        #expect(store.artifacts.count == 20)
+        #expect(Set(store.artifacts.map(\.url)).count == 20)
+        #expect(store.projectSelection.isEmpty)
+    }
+
+    @Test func cancelKeepsWhatWasFound() async throws {
+        let tmp = try TempDir()
+        try tmp.file("p/package.json")
+        try tmp.file("p/node_modules/x/index.js")
+        let name = "DevCleanerTests-\(UUID().uuidString)"
+        let store = CleanerStore(defaults: UserDefaults(suiteName: name)!,
+                                 logFile: LogFile(url: tmp.url.appendingPathComponent("log.json")))
+        store.projectRoot = tmp.url
+        store.scanProjects()
+        try await waitUntilDone(store)
+        #expect(store.artifacts.count == 1)
+
+        store.cancelProjectScan()
+        #expect(store.artifacts.count == 1)
+        #expect(!store.isScanningProjects)
+    }
+}
