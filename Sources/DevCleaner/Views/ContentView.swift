@@ -96,9 +96,7 @@ struct ContentView: View {
             ConfirmationSheet(
                 title: "Очистить выбранное (\(store.selection.count))?",
                 groups: confirmationGroups,
-                notes: [store.useTrash
-                        ? "Файлы будут перемещены в Корзину."
-                        : "Файлы будут удалены безвозвратно. Безопасные кэши восстановятся сами при следующей сборке или установке."],
+                notes: confirmationNotes,
                 confirmTitle: "Очистить \(Format.bytes(store.selectedSize))"
             ) {
                 Task { await store.cleanSelected() }
@@ -108,6 +106,17 @@ struct ContentView: View {
 }
 
 extension ContentView {
+    fileprivate var confirmationNotes: [String] {
+        var notes = [store.useTrash
+            ? "Файлы будут перемещены в Корзину. Место освободится после её очистки."
+            : "Файлы будут удалены безвозвратно. Безопасные кэши восстановятся сами при следующей сборке или установке."]
+        let permanent = store.selectedTargets.filter(\.alwaysPermanent)
+        if store.useTrash, !permanent.isEmpty {
+            notes.append("«\(permanent.map(\.name).joined(separator: "», «"))» очищается безвозвратно, даже в режиме «В Корзину».")
+        }
+        return notes
+    }
+
     fileprivate var confirmationGroups: [ConfirmationSheet.Group] {
         func rows(_ risk: CleanupTarget.Risk) -> [ConfirmationSheet.Row] {
             store.selectedTargets.filter { $0.risk == risk }.map { target in

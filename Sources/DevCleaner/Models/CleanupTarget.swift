@@ -59,6 +59,8 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
     let risk: Risk
     /// Программа, без которой команда не сработает. По умолчанию — первое слово команды.
     let requiredTool: String?
+    /// Всегда удалять безвозвратно, даже в режиме «В Корзину» (сама Корзина).
+    let alwaysPermanent: Bool
 
     init(
         id: String,
@@ -68,8 +70,10 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
         paths: [String],
         action: Action = .delete(contentsOnly: false),
         risk: Risk = .safe,
-        requires tool: String? = nil
+        requires tool: String? = nil,
+        alwaysPermanent: Bool = false
     ) {
+        self.alwaysPermanent = alwaysPermanent
         self.id = id
         self.name = name
         self.detail = detail

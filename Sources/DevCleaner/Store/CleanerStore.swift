@@ -21,6 +21,7 @@ final class CleanerStore {
     var cleaningTargetID: String?
     var useTrash = false
     var disk: DiskInfo? = DiskInfo.current()
+    var hasFullDiskAccess = true
     var log: [LogEntry] = []
 
     // MARK: Проекты
@@ -58,6 +59,7 @@ final class CleanerStore {
         }
 
         disk = DiskInfo.current()
+        hasFullDiskAccess = await Task.detached { FullDiskAccess.isGranted() }.value
     }
 
     func size(of target: CleanupTarget) -> Int64 {

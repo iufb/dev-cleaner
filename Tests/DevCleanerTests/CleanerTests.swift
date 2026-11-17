@@ -60,3 +60,34 @@ import Testing
         #expect(tmp.exists("home/.cache"))
     }
 }
+
+@Suite struct CleanerContentsOnlyTests {
+    @Test func unreadableFolderIsAnErrorNotZeroSuccess() throws {
+        let tmp = try TempDir()
+        let home = try tmp.dir("home")
+        let trash = try tmp.dir("home/.Trash")
+        try tmp.file("home/.Trash/old.zip")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: trash.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: trash.path) }
+
+        #expect(throws: Cleaner.CleanError.self) {
+            try Cleaner.remove([trash], contentsOnly: true, useTrash: false, home: home)
+        }
+    }
+
+    @Test func contentsOnlyKeepsFolder() throws {
+        let tmp = try TempDir()
+        let home = try tmp.dir("home")
+        try tmp.file("home/.Trash/a")
+        try tmp.file("home/.Trash/b/c")
+        let result = try Cleaner.remove([home.appendingPathComponent(".Trash")], contentsOnly: true, useTrash: false, home: home)
+        #expect(result.removed == 2)
+        #expect(tmp.exists("home/.Trash"))
+        #expect(!tmp.exists("home/.Trash/a"))
+    }
+
+    @Test func trashTargetIsAlwaysPermanent() throws {
+        let trash = try #require(Catalog.all.first { $0.id == "trash" })
+        #expect(trash.alwaysPermanent)
+    }
+}

@@ -4,6 +4,7 @@ enum Cleaner {
     enum CleanError: LocalizedError {
         case unsafePath(String)
         case nothingRemoved([String])
+        case unreadable(String, String)
 
         var errorDescription: String? {
             switch self {
@@ -11,6 +12,8 @@ enum Cleaner {
                 "отказ: путь \(path) защищён"
             case .nothingRemoved(let errors):
                 "ничего не удалено. " + errors.prefix(3).joined(separator: "; ")
+            case .unreadable(let path, let reason):
+                "не удалось прочитать \(path): \(reason). Возможно, нужен Полный доступ к диску"
             }
         }
     }
@@ -43,8 +46,9 @@ enum Cleaner {
 
         case .delete(let contentsOnly):
             let urls = target.urls
+            let trash = useTrash && !target.alwaysPermanent
             let result = try await Task.detached(priority: .userInitiated) {
-                try remove(urls, contentsOnly: contentsOnly, useTrash: useTrash)
+                try remove(urls, contentsOnly: contentsOnly, useTrash: trash)
             }.value
             return result.summary
         }
@@ -64,8 +68,11 @@ enum Cleaner {
         for url in urls where fm.fileExists(atPath: url.path) {
             try assertSafe(url, home: home)
             if contentsOnly {
-                let children = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-                items.append(contentsOf: children)
+                do {
+                    items.append(contentsOf: try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil))
+                } catch {
+                    throw CleanError.unreadable(url.path, error.localizedDescription)
+                }
             } else {
                 items.append(url)
             }
