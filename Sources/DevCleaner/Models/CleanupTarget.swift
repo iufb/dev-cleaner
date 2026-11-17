@@ -3,7 +3,7 @@ import Foundation
 /// Одна «цель» очистки: кэш, папка или команда.
 struct CleanupTarget: Identifiable, Hashable, Sendable {
     enum Category: String, CaseIterable, Identifiable, Hashable, Sendable {
-        case mobile, web, agents, system
+        case mobile, web, languages, agents, system
 
         var id: String { rawValue }
 
@@ -11,6 +11,7 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
             switch self {
             case .mobile: "Мобильная разработка"
             case .web: "Веб и Node"
+            case .languages: "Другие языки"
             case .agents: "AI и агенты"
             case .system: "Система"
             }
@@ -19,7 +20,8 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
         var subtitle: String {
             switch self {
             case .mobile: "Xcode, симуляторы, CocoaPods, SwiftPM, Gradle, Android, Flutter"
-            case .web: "npm, yarn, pnpm, bun, браузеры для тестов, Homebrew, Docker"
+            case .web: "npm, yarn, pnpm, bun, браузеры для тестов, Homebrew, Docker, OrbStack"
+            case .languages: "Rust, Go, Maven, NuGet"
             case .agents: "Модели, Python-кэши, логи агентов и редакторов"
             case .system: "Логи, корзина, бэкапы iOS-устройств"
             }
@@ -29,6 +31,7 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
             switch self {
             case .mobile: "iphone"
             case .web: "globe"
+            case .languages: "chevron.left.forwardslash.chevron.right"
             case .agents: "cpu"
             case .system: "gearshape"
             }
@@ -88,8 +91,20 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// Пути с раскрытой `~`. Последний компонент может быть шаблоном `Prefix*`:
+    /// тогда берутся все подходящие папки рядом (`AndroidStudio2024.1`, `AndroidStudio2025.1`).
     var urls: [URL] {
-        paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        paths.flatMap { Self.expand($0) }
+    }
+
+    static func expand(_ path: String) -> [URL] {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let last = url.lastPathComponent
+        guard last.hasSuffix("*") else { return [url] }
+        let parent = url.deletingLastPathComponent()
+        let prefix = last.dropLast()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
+        return names.filter { $0.hasPrefix(prefix) }.sorted().map { parent.appendingPathComponent($0) }
     }
 
     var isCommand: Bool {
