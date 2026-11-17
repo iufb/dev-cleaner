@@ -7,6 +7,8 @@ final class CleanerStore {
     struct Measurement: Sendable {
         var size: Int64
         var exists: Bool
+        /// Для целей-команд: найден ли нужный инструмент. `nil` — проверка не нужна.
+        var installed: Bool? = nil
     }
 
     // MARK: Кэши
@@ -35,17 +37,18 @@ final class CleanerStore {
     // MARK: - Подсчёт
 
     func scanAll() async {
-        let measurable = targets.filter { !$0.paths.isEmpty }
-        scanning = Set(measurable.map(\.id))
+        scanning = Set(targets.map(\.id))
 
         await withTaskGroup(of: (String, Measurement).self) { group in
-            for target in measurable {
+            for target in targets {
                 let id = target.id
                 let urls = target.urls
+                let tool = target.requiredTool
                 group.addTask(priority: .utility) {
                     let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
                     let size = existing.reduce(Int64(0)) { $0 + SizeCalculator.size(of: $1) }
-                    return (id, Measurement(size: size, exists: !existing.isEmpty))
+                    let installed = tool.map { Shell.which($0) != nil }
+                    return (id, Measurement(size: size, exists: !existing.isEmpty, installed: installed))
                 }
             }
             for await (id, measurement) in group {
@@ -62,7 +65,12 @@ final class CleanerStore {
     }
 
     func isAvailable(_ target: CleanupTarget) -> Bool {
-        target.isCommand || measurements[target.id]?.exists == true
+        if target.isCommand { return isInstalled(target) }
+        return measurements[target.id]?.exists == true
+    }
+
+    func isInstalled(_ target: CleanupTarget) -> Bool {
+        measurements[target.id]?.installed ?? true
     }
 
     func total(for category: CleanupTarget.Category) -> Int64 {

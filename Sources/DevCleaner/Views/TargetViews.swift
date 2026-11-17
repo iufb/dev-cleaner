@@ -100,6 +100,9 @@ struct TargetRow: View {
             ProgressView().controlSize(.small)
         } else if store.scanning.contains(target.id) {
             ProgressView().controlSize(.small)
+        } else if !store.isInstalled(target) {
+            Text("не установлено").foregroundStyle(.tertiary)
+                .help("\(target.requiredTool ?? "Инструмент") не найден в PATH")
         } else if target.paths.isEmpty {
             Text("—").foregroundStyle(.secondary)
         } else if store.measurements[target.id]?.exists == true {

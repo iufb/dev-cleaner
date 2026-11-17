@@ -45,7 +45,7 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
     enum Action: Hashable, Sendable {
         /// Удалить папки целиком (или только их содержимое).
         case delete(contentsOnly: Bool)
-        /// Выполнить shell-команду (через login-shell, чтобы был PATH из .zprofile).
+        /// Выполнить shell-команду с PATH из login shell пользователя.
         case command(String)
     }
 
@@ -57,6 +57,8 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
     let paths: [String]
     let action: Action
     let risk: Risk
+    /// Программа, без которой команда не сработает. По умолчанию — первое слово команды.
+    let requiredTool: String?
 
     init(
         id: String,
@@ -65,7 +67,8 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
         category: Category,
         paths: [String],
         action: Action = .delete(contentsOnly: false),
-        risk: Risk = .safe
+        risk: Risk = .safe,
+        requires tool: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -74,6 +77,11 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
         self.paths = paths
         self.action = action
         self.risk = risk
+        if case .command(let command) = action {
+            self.requiredTool = tool ?? command.split(separator: " ").first.map(String.init)
+        } else {
+            self.requiredTool = tool
+        }
     }
 
     var urls: [URL] {
