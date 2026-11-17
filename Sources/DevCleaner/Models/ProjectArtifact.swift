@@ -56,7 +56,8 @@ struct LogEntry: Identifiable, Codable, Equatable, Sendable {
 
 enum Format {
     static func bytes(_ value: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+        // Интерфейс на русском, поэтому и единицы русские («ГБ», а не «GB»), и ноль — числом.
+        value.formatted(.byteCount(style: .file, spellsOutZero: false).locale(Locale(identifier: "ru_RU")))
     }
 
     /// «Очистить 3,2 ГБ», а если размер неизвестен (только команды) — «Очистить (2)».

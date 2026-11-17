@@ -3,7 +3,6 @@ import AppKit
 
 struct ProjectsView: View {
     @Environment(CleanerStore.self) private var store
-    @State private var confirmDelete = false
 
     var body: some View {
         @Bindable var store = store
@@ -25,7 +24,7 @@ struct ProjectsView: View {
                     Text("30+ дней").tag(30)
                     Text("90+ дней").tag(90)
                 }
-                .frame(width: 260)
+                .fixedSize()
 
                 Spacer()
 
@@ -61,47 +60,36 @@ struct ProjectsView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 6)
                 Divider()
+            } else if !store.filteredArtifacts.isEmpty {
+                foundSummary
+                Divider()
             }
 
             content
-
-            Divider()
-
-            HStack {
-                Text("Выбрано: \(store.selectedArtifacts.count) · \(Format.bytes(store.selectedArtifacts.reduce(0) { $0 + $1.size }))")
-                    .monospacedDigit()
-                Spacer()
-                Button("Выбрать все") {
-                    store.projectSelection = Set(store.filteredArtifacts.map(\.id))
-                }
-                .disabled(store.filteredArtifacts.isEmpty)
-                Button("Удалить выбранное", role: .destructive) {
-                    confirmDelete = true
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(store.selectedArtifacts.isEmpty || store.isCleaning || store.isScanningProjects)
-            }
-            .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Артефакты сборки")
-        .sheet(isPresented: $confirmDelete) {
-            ConfirmationSheet(
-                title: "Удалить \(store.selectedArtifacts.count) папок?",
-                groups: [.init(title: "Артефакты сборки", rows: store.selectedArtifacts.map { artifact in
-                    ConfirmationSheet.Row(
-                        id: artifact.url.path,
-                        title: "\(artifact.projectName) · \(artifact.kind)",
-                        subtitle: artifact.url.path,
-                        size: Format.bytes(artifact.size)
-                    )
-                })],
-                notes: ["node_modules, Pods, build и подобное восстанавливаются командами npm install, pod install или сборкой проекта."],
-                confirmTitle: "Удалить \(Format.bytes(store.selectedArtifacts.reduce(0) { $0 + $1.size }))"
-            ) {
-                Task { await store.deleteSelectedArtifacts() }
+    }
+
+    private var allSelected: Bool {
+        !store.filteredArtifacts.isEmpty && store.selectedArtifacts.count == store.filteredArtifacts.count
+    }
+
+    private var foundSummary: some View {
+        HStack(spacing: 8) {
+            Text("Найдено \(store.filteredArtifacts.count) · \(Format.bytes(store.filteredArtifacts.reduce(0) { $0 + $1.size }))")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(allSelected ? "Снять выбор" : "Выбрать все") {
+                store.projectSelection = allSelected ? [] : Set(store.filteredArtifacts.map(\.id))
             }
+            .buttonStyle(.link)
         }
+        .font(.callout)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -115,7 +103,8 @@ struct ProjectsView: View {
             } description: {
                 Text("Например ~/Developer или ~/Projects. Поиск по всей домашней папке тоже работает, но займёт больше времени.")
             } actions: {
-                Button("Найти") { store.scanProjects() }
+                Button("Найти артефакты") { store.scanProjects() }
+                    .buttonStyle(.borderedProminent)
             }
         } else if store.filteredArtifacts.isEmpty && !store.isScanningProjects {
             ContentUnavailableView("Ничего не найдено",

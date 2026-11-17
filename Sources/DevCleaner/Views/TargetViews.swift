@@ -63,7 +63,8 @@ struct TargetRow: View {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.checkbox)
-                .disabled(!store.isAvailable(target) || store.isCleaning)
+                .disabled(!canToggle)
+                .accessibilityLabel(target.name)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -91,7 +92,7 @@ struct TargetRow: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .textSelection(.enabled)
+                    .help(target.displayLocation)
             }
 
             Spacer(minLength: 12)
@@ -99,18 +100,39 @@ struct TargetRow: View {
             sizeLabel
                 .frame(minWidth: 80, alignment: .trailing)
 
-            Button {
-                let existing = target.urls.filter { FileManager.default.fileExists(atPath: $0.path) }
-                NSWorkspace.shared.activateFileViewerSelecting(existing)
-            } label: {
+            Button(action: revealInFinder) {
                 Image(systemName: "magnifyingglass")
             }
             .buttonStyle(.borderless)
             .help("Показать в Finder")
-            .disabled(store.measurements[target.id]?.exists != true)
+            .accessibilityLabel("Показать в Finder")
+            .disabled(!existsOnDisk)
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        // Строка целиком — область нажатия, как у чекбокса с подписью.
+        .onTapGesture { if canToggle { isOn.wrappedValue.toggle() } }
         .opacity(store.isAvailable(target) ? 1 : 0.5)
+        .contextMenu {
+            Button("Показать в Finder", action: revealInFinder).disabled(!existsOnDisk)
+            Button(target.isCommand ? "Скопировать команду" : "Скопировать путь") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copyText, forType: .string)
+            }
+        }
+    }
+
+    private var canToggle: Bool { store.isAvailable(target) && !store.isCleaning }
+    private var existsOnDisk: Bool { store.measurements[target.id]?.exists == true }
+
+    private var copyText: String {
+        if case .command(let command) = target.action { return command }
+        return target.urls.map(\.path).joined(separator: "\n")
+    }
+
+    private func revealInFinder() {
+        let existing = target.urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        NSWorkspace.shared.activateFileViewerSelecting(existing)
     }
 
     @ViewBuilder
@@ -124,7 +146,9 @@ struct TargetRow: View {
                 .help("\(target.requiredTool ?? "Инструмент") не найден в PATH")
         } else if target.paths.isEmpty {
             Text("—").foregroundStyle(.secondary)
-        } else if store.measurements[target.id]?.exists == true {
+        } else if existsOnDisk, store.size(of: target) == 0 {
+            Text("пусто").foregroundStyle(.tertiary)
+        } else if existsOnDisk {
             Text(Format.bytes(store.size(of: target)))
                 .monospacedDigit()
                 .fontWeight(store.size(of: target) > 1_000_000_000 ? .semibold : .regular)

@@ -18,8 +18,10 @@ struct ConfirmationSheet: View {
 
     let title: String
     let groups: [Group]
-    let notes: [String]
-    let confirmTitle: String
+    /// Режим удаления выбирается здесь, в момент решения, а не заранее в тулбаре.
+    @Binding var useTrash: Bool
+    let notes: (_ useTrash: Bool) -> [String]
+    let confirmTitle: (_ useTrash: Bool) -> String
     let onConfirm: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -56,7 +58,14 @@ struct ConfirmationSheet: View {
             .listStyle(.inset(alternatesRowBackgrounds: true))
             .frame(minHeight: 160, idealHeight: 280)
 
-            ForEach(notes, id: \.self) { note in
+            Picker("Удалить", selection: $useTrash) {
+                Text("В Корзину").tag(true)
+                Text("Безвозвратно").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+
+            ForEach(notes(useTrash), id: \.self) { note in
                 Text(note)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -67,7 +76,7 @@ struct ConfirmationSheet: View {
                 Spacer()
                 Button("Отмена", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(confirmTitle, role: .destructive) {
+                Button(confirmTitle(useTrash), role: .destructive) {
                     dismiss()
                     onConfirm()
                 }

@@ -70,6 +70,6 @@ Sources/DevCleaner/
   Models/                    CleanupTarget, Catalog (список путей), ProjectArtifact, DiskInfo
   Services/                  SizeCalculator, Cleaner, ProjectScanner, Shell, FullDiskAccess, Paths
   Store/                     CleanerStore (@Observable-состояние), сохранение журнала и настроек
-  Views/                     сайдбар, сводка с Charts, списки, таблица проектов, журнал, подтверждение
+  Views/                     сайдбар, сводка с полосой занятого места, плашка выбора, списки, таблица проектов, журнал, подтверждение
 Tests/DevCleanerTests/       swift test: удаление, сканер, правила, размеры, shell, каталог
 ```
