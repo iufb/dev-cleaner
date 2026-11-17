@@ -62,15 +62,22 @@ struct ProjectsView: View {
             .padding()
         }
         .navigationTitle("Артефакты сборки")
-        .confirmationDialog(
-            "Удалить \(store.selectedArtifacts.count) папок?",
-            isPresented: $confirmDelete
-        ) {
-            Button("Удалить", role: .destructive) {
+        .sheet(isPresented: $confirmDelete) {
+            ConfirmationSheet(
+                title: "Удалить \(store.selectedArtifacts.count) папок?",
+                groups: [.init(title: "Артефакты сборки", rows: store.selectedArtifacts.map { artifact in
+                    ConfirmationSheet.Row(
+                        id: artifact.url.path,
+                        title: "\(artifact.projectName) · \(artifact.kind)",
+                        subtitle: artifact.url.path,
+                        size: Format.bytes(artifact.size)
+                    )
+                })],
+                notes: ["node_modules, Pods, build и подобное восстанавливаются командами npm install, pod install или сборкой проекта."],
+                confirmTitle: "Удалить \(Format.bytes(store.selectedArtifacts.reduce(0) { $0 + $1.size }))"
+            ) {
                 Task { await store.deleteSelectedArtifacts() }
             }
-        } message: {
-            Text("node_modules, Pods, build и подобное восстанавливаются командами npm install, pod install или сборкой проекта.")
         }
     }
 

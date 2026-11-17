@@ -54,9 +54,6 @@ final class CleanerStore {
             }
         }
 
-        if selection.isEmpty {
-            selection = Set(targets.filter { $0.risk == .safe && size(of: $0) > 0 }.map(\.id))
-        }
         disk = DiskInfo.current()
     }
 
@@ -76,8 +73,12 @@ final class CleanerStore {
         targets.reduce(0) { $0 + size(of: $1) }
     }
 
+    var selectedTargets: [CleanupTarget] {
+        targets.filter { selection.contains($0.id) }
+    }
+
     var selectedSize: Int64 {
-        targets.filter { selection.contains($0.id) }.reduce(0) { $0 + size(of: $1) }
+        selectedTargets.reduce(0) { $0 + size(of: $1) }
     }
 
     // MARK: - Выбор
@@ -144,7 +145,7 @@ final class CleanerStore {
         artifacts = await Task.detached(priority: .utility) {
             ProjectScanner.scan(root: root)
         }.value
-        projectSelection = Set(filteredArtifacts.map(\.id))
+        projectSelection = []
         didScanProjects = true
         isScanningProjects = false
     }

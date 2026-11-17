@@ -92,18 +92,37 @@ struct ContentView: View {
                 .disabled(store.selection.isEmpty || store.isBusy)
             }
         }
-        .confirmationDialog(
-            "Очистить выбранное (\(store.selection.count))?",
-            isPresented: $confirmClean
-        ) {
-            Button("Очистить \(Format.bytes(store.selectedSize))", role: .destructive) {
+        .sheet(isPresented: $confirmClean) {
+            ConfirmationSheet(
+                title: "Очистить выбранное (\(store.selection.count))?",
+                groups: confirmationGroups,
+                notes: [store.useTrash
+                        ? "Файлы будут перемещены в Корзину."
+                        : "Файлы будут удалены безвозвратно. Безопасные кэши восстановятся сами при следующей сборке или установке."],
+                confirmTitle: "Очистить \(Format.bytes(store.selectedSize))"
+            ) {
                 Task { await store.cleanSelected() }
             }
-        } message: {
-            Text(store.useTrash
-                 ? "Файлы будут перемещены в Корзину."
-                 : "Файлы будут удалены безвозвратно. Кэши восстановятся сами при следующей сборке или установке.")
         }
+    }
+}
+
+extension ContentView {
+    fileprivate var confirmationGroups: [ConfirmationSheet.Group] {
+        func rows(_ risk: CleanupTarget.Risk) -> [ConfirmationSheet.Row] {
+            store.selectedTargets.filter { $0.risk == risk }.map { target in
+                ConfirmationSheet.Row(
+                    id: target.id,
+                    title: target.name,
+                    subtitle: target.displayLocation,
+                    size: target.paths.isEmpty ? "команда" : Format.bytes(store.size(of: target))
+                )
+            }
+        }
+        return [
+            .init(title: "Осторожно: долго восстанавливать или нельзя восстановить", rows: rows(.caution), warning: true),
+            .init(title: "Безопасно", rows: rows(.safe)),
+        ]
     }
 }
 
