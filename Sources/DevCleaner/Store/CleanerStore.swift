@@ -107,6 +107,16 @@ final class CleanerStore {
         targets.reduce(0) { $0 + size(of: $1) }
     }
 
+    /// Что можно освободить без риска: ровно то, что выбирает `selectSafe()`.
+    var safeTargets: [CleanupTarget] {
+        targets.filter { $0.risk == .safe && size(of: $0) > 0 }
+    }
+
+    /// «Осторожные» цели, которые реально что-то занимают.
+    var cautionTargets: [CleanupTarget] {
+        targets.filter { $0.risk == .caution && size(of: $0) > 0 }
+    }
+
     var selectedTargets: [CleanupTarget] {
         targets.filter { selection.contains($0.id) }
     }
@@ -122,8 +132,8 @@ final class CleanerStore {
     }
 
     func selectSafe(in category: CleanupTarget.Category? = nil) {
-        for target in targets where target.risk == .safe && (category == nil || target.category == category) {
-            if size(of: target) > 0 { selection.insert(target.id) }
+        for target in safeTargets where category == nil || target.category == category {
+            selection.insert(target.id)
         }
     }
 

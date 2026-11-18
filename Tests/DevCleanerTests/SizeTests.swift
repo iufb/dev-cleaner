@@ -38,4 +38,19 @@ import Testing
         #expect(Cleaner.totalLine(freeBefore: 100, freeAfter: 100, useTrash: true).contains("Корзины"))
         #expect(Cleaner.totalLine(freeBefore: 0, freeAfter: 2_000_000, useTrash: false).contains("свободнее"))
     }
+
+    @Test func russianPlural() {
+        #expect(Format.count(1, "папка", "папки", "папок") == "1 папка")
+        #expect(Format.count(3, "папка", "папки", "папок") == "3 папки")
+        #expect(Format.count(5, "папка", "папки", "папок") == "5 папок")
+        #expect(Format.count(11, "папка", "папки", "папок") == "11 папок")
+        #expect(Format.count(21, "папка", "папки", "папок") == "21 папка")
+        #expect(Format.count(112, "папка", "папки", "папок") == "112 папок")
+    }
+
+    @Test func displayPathAbbreviatesHome() {
+        #expect(Paths.display(URL(fileURLWithPath: "/Users/me/Projects"), home: "/Users/me") == "~/Projects")
+        #expect(Paths.display(URL(fileURLWithPath: "/Users/me"), home: "/Users/me") == "~")
+        #expect(Paths.display(URL(fileURLWithPath: "/Users/meow"), home: "/Users/me") == "/Users/meow")
+    }
 }

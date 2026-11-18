@@ -1,70 +1,65 @@
 import SwiftUI
 
+/// Сводка отвечает на вопрос «сколько можно освободить и как»:
+/// главная цифра — безопасное, ниже советы с одним действием каждый.
 struct OverviewView: View {
     var onOpen: (CleanupTarget.Category) -> Void
+    var onOpenProjects: (_ startScan: Bool) -> Void
     @Environment(CleanerStore.self) private var store
-
-    private var topTargets: [CleanupTarget] {
-        store.targets
-            .filter { store.size(of: $0) > 0 }
-            .sorted { store.size(of: $0) > store.size(of: $1) }
-            .prefix(10)
-            .map { $0 }
-    }
+    @State private var showCaution = false
 
     private var isMeasuring: Bool { !store.scanning.isEmpty }
+    private var safeSize: Int64 { store.safeTargets.reduce(0) { $0 + store.size(of: $1) } }
+    private var cautionSize: Int64 { store.cautionTargets.reduce(0) { $0 + store.size(of: $1) } }
+    private var allSafeSelected: Bool {
+        !store.safeTargets.isEmpty && store.safeTargets.allSatisfy { store.selection.contains($0.id) }
+    }
 
     var body: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     header
-                    UsageBar(segments: CleanupTarget.Category.allCases.map { ($0.color, store.total(for: $0)) })
+                    VStack(alignment: .leading, spacing: 10) {
+                        UsageBar(segments: CleanupTarget.Category.allCases.map { ($0.color, store.total(for: $0)) })
+                        legend
+                    }
                     if let disk = store.disk {
                         DiskLine(disk: disk)
-                            .padding(.top, 4)
                     }
                 }
                 .padding(.vertical, 10)
             }
 
-            Section("По категориям") {
-                ForEach(CleanupTarget.Category.allCases) { category in
-                    CategoryRow(category: category,
-                                size: store.total(for: category),
-                                total: store.grandTotal) { onOpen(category) }
+            Section("Советы") {
+                safeTip
+                artifactsTip
+                if !store.cautionTargets.isEmpty {
+                    cautionTip
+                    if showCaution {
+                        ForEach(store.cautionTargets.sorted { store.size(of: $0) > store.size(of: $1) }) {
+                            TargetRow(target: $0)
+                        }
+                    }
                 }
-            }
-
-            Section("Самое тяжёлое") {
-                if topTargets.isEmpty {
-                    Text(isMeasuring ? "Считаю…" : "Ничего не найдено")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(topTargets) { TargetRow(target: $0) }
-                }
-            }
-
-            Section {
-                Label("Ещё больше места обычно занимают node_modules, Pods и build внутри проектов. Их ищет раздел «Артефакты сборки».",
-                      systemImage: "lightbulb")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Сводка")
     }
 
+    // MARK: - Шапка
+
     private var header: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(Format.bytes(store.grandTotal))
+                Text(Format.bytes(safeSize))
                     .font(.system(size: 30, weight: .semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .animation(.smooth(duration: 0.2), value: store.grandTotal)
+                    .animation(.smooth(duration: 0.2), value: safeSize)
                 HStack(spacing: 6) {
-                    Text(subtitle)
+                    Text("можно освободить без риска · всего кэшей \(Format.bytes(store.grandTotal))")
+                        .monospacedDigit()
                     if isMeasuring {
                         ProgressView().controlSize(.mini)
                     }
@@ -73,17 +68,146 @@ struct OverviewView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Выбрать все безопасные") { store.selectSafe() }
-                .disabled(isMeasuring || store.isCleaning)
+            Button("Выбрать безопасное") { store.selectSafe() }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .disabled(isMeasuring || store.isCleaning || store.safeTargets.isEmpty || allSafeSelected)
         }
     }
 
-    private var subtitle: String {
-        guard let disk = store.disk, disk.total > 0, store.grandTotal > 0 else {
-            return "занято кэшами разработки"
+    private var legend: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 20, alignment: .leading)],
+                  alignment: .leading, spacing: 6) {
+            ForEach(CleanupTarget.Category.allCases) { category in
+                Button { onOpen(category) } label: {
+                    HStack(spacing: 7) {
+                        Circle().fill(category.color).frame(width: 8, height: 8)
+                        Text(category.title)
+                            .lineLimit(1)
+                        Text(Format.bytes(store.total(for: category)))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .opacity(store.total(for: category) > 0 ? 1 : 0.55)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Открыть «\(category.title)»")
+            }
         }
-        let share = Double(store.grandTotal) / Double(disk.total)
-        return "занято кэшами разработки · \(share.formatted(.percent.precision(.fractionLength(share < 0.1 ? 1 : 0)))) диска"
+        .font(.callout)
+    }
+
+    // MARK: - Советы
+
+    private var safeTip: some View {
+        let targets = store.safeTargets.sorted { store.size(of: $0) > store.size(of: $1) }
+        return TipRow(
+            icon: "checkmark.shield",
+            tint: .green,
+            title: "Безопасные кэши",
+            detail: targets.isEmpty
+                ? (isMeasuring ? "Считаю размеры…" : "Безопасных кэшей с данными не нашлось.")
+                : "\(names(targets)). Восстановятся сами при следующей сборке или установке.",
+            size: targets.isEmpty ? nil : Format.bytes(safeSize)
+        ) {
+            if allSafeSelected {
+                Label("Выбрано", systemImage: "checkmark")
+                    .foregroundStyle(.secondary)
+            } else if !targets.isEmpty {
+                Button("Выбрать") { store.selectSafe() }
+                    .disabled(isMeasuring || store.isCleaning)
+            }
+        }
+    }
+
+    private var artifactsTip: some View {
+        let found = store.filteredArtifacts
+        let foundSize = found.reduce(0) { $0 + $1.size }
+        let age = store.minAgeDays > 0 ? ", которые не трогали \(store.minAgeDays)+ дней" : ""
+        let root = Paths.display(store.projectRoot)
+        let started = store.didScanProjects || store.isScanningProjects
+        let detail: String
+        if store.isScanningProjects {
+            detail = "Ищу в \(root)… найдено \(store.artifacts.count)."
+        } else if store.didScanProjects {
+            detail = found.isEmpty
+                ? "В проектах\(age) ничего не нашлось."
+                : "\(Format.count(found.count, "папка", "папки", "папок")) в проектах\(age): node_modules, Pods, build и другое."
+        } else {
+            detail = "node_modules, Pods, build и другое в \(root). Обычно это больше, чем все кэши."
+        }
+        return TipRow(
+            icon: "folder.badge.gearshape",
+            tint: .blue,
+            title: "Артефакты в проектах",
+            detail: detail,
+            size: started ? Format.bytes(store.isScanningProjects ? store.foundSize : foundSize) : nil
+        ) {
+            if started {
+                Button("Открыть") { onOpenProjects(false) }
+            } else {
+                Button("Найти") { onOpenProjects(true) }
+            }
+        }
+    }
+
+    private var cautionTip: some View {
+        let targets = store.cautionTargets.sorted { store.size(of: $0) > store.size(of: $1) }
+        return TipRow(
+            icon: "exclamationmark.triangle",
+            tint: .orange,
+            title: "Требуют внимания",
+            detail: "\(names(targets)). Восстанавливать долго или нельзя.",
+            size: Format.bytes(cautionSize)
+        ) {
+            Button(showCaution ? "Скрыть" : "Показать") {
+                withAnimation(.snappy(duration: 0.2)) { showCaution.toggle() }
+            }
+        }
+    }
+
+    /// «pnpm store, Xcode DerivedData, Swift PM и ещё 4».
+    private func names(_ targets: [CleanupTarget]) -> String {
+        let head = targets.prefix(3).map(\.name).joined(separator: ", ")
+        let rest = targets.count - 3
+        return rest > 0 ? "\(head) и ещё \(rest)" : head
+    }
+}
+
+/// Строка совета: что это, сколько занимает и одно действие справа.
+private struct TipRow<Action: View>: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let detail: String
+    let size: String?
+    @ViewBuilder let action: () -> Action
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 16)
+            Text(size ?? "—")
+                .font(.body.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(size == nil ? .tertiary : .primary)
+                .frame(minWidth: 72, alignment: .trailing)
+            action()
+                .frame(minWidth: 92, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
     }
 }
 
@@ -111,50 +235,6 @@ struct UsageBar: View {
         .frame(height: 10)
         .animation(.smooth(duration: 0.25), value: segments.map(\.size))
         .accessibilityHidden(true)
-    }
-}
-
-private struct CategoryRow: View {
-    let category: CleanupTarget.Category
-    let size: Int64
-    let total: Int64
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(category.color)
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(category.title)
-                    Text(category.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 12)
-                if size > 0, total > 0 {
-                    let share = Double(size) / Double(total)
-                    Text(share < 0.01 ? "<1%" : share.formatted(.percent.precision(.fractionLength(0))))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .frame(minWidth: 40, alignment: .trailing)
-                }
-                Text(Format.bytes(size))
-                    .monospacedDigit()
-                    .foregroundStyle(size > 0 ? .primary : .tertiary)
-                    .frame(minWidth: 72, alignment: .trailing)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(category.title), \(Format.bytes(size))")
     }
 }
 

@@ -59,7 +59,13 @@ struct ContentView: View {
             Group {
                 switch sidebar ?? .overview {
                 case .overview:
-                    OverviewView(onOpen: { sidebar = .category($0) })
+                    OverviewView(
+                        onOpen: { sidebar = .category($0) },
+                        onOpenProjects: { startScan in
+                            sidebar = .projects
+                            if startScan, !store.isScanningProjects { store.scanProjects() }
+                        }
+                    )
                 case .category(let category):
                     TargetListView(category: category)
                 case .projects:

@@ -60,6 +60,16 @@ enum Format {
         value.formatted(.byteCount(style: .file, spellsOutZero: false).locale(Locale(identifier: "ru_RU")))
     }
 
+    /// «1 папка», «3 папки», «5 папок»: русское склонение по числу.
+    static func count(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        let mod100 = n % 100, mod10 = n % 10
+        let word = (11...14).contains(mod100) ? many
+            : mod10 == 1 ? one
+            : (2...4).contains(mod10) ? few
+            : many
+        return "\(n) \(word)"
+    }
+
     /// «Очистить 3,2 ГБ», а если размер неизвестен (только команды) — «Очистить (2)».
     static func cleanTitle(count: Int, size: Int64) -> String {
         size > 0 ? "Очистить \(bytes(size))" : "Очистить (\(count))"
