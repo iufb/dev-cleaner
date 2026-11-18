@@ -52,6 +52,19 @@ struct LogEntry: Identifiable, Codable, Equatable, Sendable {
     var date = Date()
     let text: String
     let ok: Bool
+    /// Запуск очистки, к которому относится запись. У записей старых версий — `nil`.
+    var runID: UUID? = nil
+    /// Сводка запуска: есть только у итоговой записи.
+    var run: RunInfo? = nil
+
+    struct RunInfo: Codable, Equatable, Sendable {
+        /// «Кэши» или «Проекты».
+        var scope: String
+        var items: Int
+        var useTrash: Bool
+        /// Насколько выросло свободное место; `nil`, если узнать не удалось.
+        var freed: Int64?
+    }
 }
 
 enum Format {

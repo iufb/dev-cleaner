@@ -362,36 +362,3 @@ private struct ArtifactRow: View {
         }
     }
 }
-
-struct LogView: View {
-    @Environment(CleanerStore.self) private var store
-
-    var body: some View {
-        Group {
-            if store.log.isEmpty {
-                ContentUnavailableView("Пока пусто", systemImage: "list.bullet.rectangle",
-                                       description: Text("Здесь появятся результаты очистки."))
-            } else {
-                List(store.log) { entry in
-                    HStack(alignment: .top) {
-                        Image(systemName: entry.ok ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                            .foregroundStyle(entry.ok ? .green : .red)
-                        Text(entry.text).textSelection(.enabled)
-                        Spacer()
-                        Text(entry.date, format: .dateTime.day().month().hour().minute())
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Журнал")
-        .toolbar {
-            ToolbarItem {
-                Button("Очистить журнал", systemImage: "trash.slash") { store.clearLog() }
-                    .disabled(store.log.isEmpty)
-                    .help("Удалить все записи журнала")
-            }
-        }
-    }
-}

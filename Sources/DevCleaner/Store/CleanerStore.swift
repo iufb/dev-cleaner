@@ -47,6 +47,8 @@ final class CleanerStore {
         didSet { settings.minAgeDays = minAgeDays }
     }
 
+    /// Запуск очистки, к которому сейчас пишутся записи журнала.
+    @ObservationIgnored private var currentRunID: UUID?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var scanGeneration: UUID?
     @ObservationIgnored private let settings: Settings
@@ -206,6 +208,8 @@ final class CleanerStore {
 
         isCleaning = true
         lastReport = nil
+        currentRunID = UUID()
+        defer { currentRunID = nil }
         let trash = useTrash
         let before = DiskInfo.freeBytes()
         var errors: [String] = []
@@ -227,8 +231,10 @@ final class CleanerStore {
         cleanProgress = nil
         selection.removeAll()
         let after = DiskInfo.freeBytes()
-        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
-        lastReport = CleanReport(freed: Self.freed(before, after), useTrash: trash, errors: errors)
+        let freed = Self.freed(before, after)
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true,
+               run: .init(scope: "Кэши", items: chosen.count, useTrash: trash, freed: freed))
+        lastReport = CleanReport(freed: freed, useTrash: trash, errors: errors)
         isCleaning = false
         await scanAll()
     }
@@ -334,6 +340,8 @@ final class CleanerStore {
 
         isCleaning = true
         lastReport = nil
+        currentRunID = UUID()
+        defer { currentRunID = nil }
         let urls = chosen.map(\.url)
         let trash = useTrash
         let before = DiskInfo.freeBytes()
@@ -352,9 +360,11 @@ final class CleanerStore {
         }
 
         let after = DiskInfo.freeBytes()
-        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
+        let freed = Self.freed(before, after)
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true,
+               run: .init(scope: "Проекты", items: chosen.count, useTrash: trash, freed: freed))
         cleanProgress = nil
-        lastReport = CleanReport(freed: Self.freed(before, after), useTrash: trash, errors: errors)
+        lastReport = CleanReport(freed: freed, useTrash: trash, errors: errors)
 
         let removed = Set(urls.filter { !FileManager.default.fileExists(atPath: $0.path) })
         artifacts.removeAll { removed.contains($0.url) }
@@ -377,8 +387,8 @@ final class CleanerStore {
         return max(0, after - before)
     }
 
-    func addLog(_ text: String, ok: Bool) {
-        log.insert(LogEntry(text: text, ok: ok), at: 0)
+    func addLog(_ text: String, ok: Bool, run: LogEntry.RunInfo? = nil) {
+        log.insert(LogEntry(text: text, ok: ok, runID: currentRunID, run: run), at: 0)
         if log.count > LogFile.limit { log.removeLast(log.count - LogFile.limit) }
     }
 

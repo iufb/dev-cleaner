@@ -50,7 +50,6 @@ struct ContentView: View {
 
                 Section {
                     Label("Журнал", systemImage: "list.bullet.rectangle")
-                        .badge(store.log.count)
                         .tag(SidebarItem.log)
                 }
             }
