@@ -94,26 +94,25 @@ struct ContentView: View {
         }
         .sheet(isPresented: $confirmClean) {
             ConfirmationSheet(
-                title: "Очистить выбранное (\(store.selection.count))?",
-                groups: confirmationGroups,
+                title: cacheTitle,
+                warning: cacheGroup(.caution),
+                others: cacheGroup(.safe),
                 useTrash: $store.useTrash,
                 notes: confirmationNotes,
-                confirmTitle: { _ in Format.cleanTitle(count: store.selection.count, size: store.selectedSize) }
-            ) {
-                Task { await store.cleanSelected() }
-            }
+                confirmTitle: { useTrash in
+                    let size = store.selectedSize
+                    guard useTrash else { return Format.cleanTitle(count: store.selection.count, size: size) }
+                    return size > 0 ? "В Корзину \(Format.bytes(size))" : "В Корзину (\(store.selection.count))"
+                },
+                onConfirm: { await store.cleanSelected() },
+                onOpenLog: { sidebar = .log }
+            )
         }
         .sheet(isPresented: $confirmDelete) {
             ConfirmationSheet(
-                title: "Удалить \(store.selectedArtifacts.count) папок?",
-                groups: [.init(title: "Артефакты сборки", rows: store.selectedArtifacts.map { artifact in
-                    ConfirmationSheet.Row(
-                        id: artifact.url.path,
-                        title: "\(artifact.projectName) · \(artifact.kind)",
-                        subtitle: artifact.url.path,
-                        size: Format.bytes(artifact.size)
-                    )
-                })],
+                title: "Удалить \(Format.count(store.selectedArtifacts.count, "папку", "папки", "папок")) · \(Format.bytes(selectedArtifactsSize))?",
+                warning: nil,
+                others: artifactGroup,
                 useTrash: $store.useTrash,
                 notes: { useTrash in
                     [useTrash
@@ -123,10 +122,10 @@ struct ContentView: View {
                 },
                 confirmTitle: { useTrash in
                     "\(useTrash ? "В Корзину" : "Удалить") \(Format.bytes(selectedArtifactsSize))"
-                }
-            ) {
-                Task { await store.deleteSelectedArtifacts() }
-            }
+                },
+                onConfirm: { await store.deleteSelectedArtifacts() },
+                onOpenLog: { sidebar = .log }
+            )
         }
     }
 }
@@ -198,20 +197,51 @@ extension ContentView {
         return notes
     }
 
-    fileprivate var confirmationGroups: [ConfirmationSheet.Group] {
-        func rows(_ risk: CleanupTarget.Risk) -> [ConfirmationSheet.Row] {
-            store.selectedTargets.filter { $0.risk == risk }.map { target in
+    fileprivate var cacheTitle: String {
+        let count = Format.count(store.selection.count, "пункт", "пункта", "пунктов")
+        let size = store.selectedSize
+        return size > 0 ? "Очистить \(count) · \(Format.bytes(size))?" : "Очистить \(count)?"
+    }
+
+    fileprivate func cacheGroup(_ risk: CleanupTarget.Risk) -> ConfirmationSheet.Section? {
+        let targets = store.selectedTargets
+            .filter { $0.risk == risk }
+            .sorted { store.size(of: $0) > store.size(of: $1) }
+        guard !targets.isEmpty else { return nil }
+        let rows = targets.map { target in
+            ConfirmationSheet.Row(
+                id: target.id,
+                title: target.name,
+                subtitle: target.displayLocation,
+                size: target.paths.isEmpty ? "команда" : Format.bytes(store.size(of: target))
+            )
+        }
+        switch risk {
+        case .caution:
+            return .init(title: "Осторожно: долго или нельзя восстановить", rows: rows)
+        case .safe:
+            let hasCaution = store.selectedTargets.contains { $0.risk == .caution }
+            let count = Format.count(rows.count, "безопасный пункт", "безопасных пункта", "безопасных пунктов")
+            return .init(title: hasCaution ? "и ещё \(count)" : count.prefix(1).uppercased() + count.dropFirst(), rows: rows)
+        }
+    }
+
+    fileprivate var artifactGroup: ConfirmationSheet.Section {
+        let artifacts = store.selectedArtifacts.sorted { $0.size > $1.size }
+        var seen = Set<URL>()
+        let largest = artifacts.compactMap { seen.insert($0.projectURL).inserted ? $0.projectName : nil }
+        let projects = Format.count(seen.count, "проект", "проекта", "проектов")
+        let head = largest.prefix(3).joined(separator: ", ")
+        return .init(
+            title: largest.count > 3 ? "\(projects), крупнейшие: \(head)…" : "\(projects): \(head)",
+            rows: artifacts.map { artifact in
                 ConfirmationSheet.Row(
-                    id: target.id,
-                    title: target.name,
-                    subtitle: target.displayLocation,
-                    size: target.paths.isEmpty ? "команда" : Format.bytes(store.size(of: target))
+                    id: artifact.url.path,
+                    title: "\(artifact.projectName) · \(artifact.kind)",
+                    subtitle: Paths.display(artifact.projectURL),
+                    size: Format.bytes(artifact.size)
                 )
             }
-        }
-        return [
-            .init(title: "Осторожно: долго восстанавливать или нельзя восстановить", rows: rows(.caution), warning: true),
-            .init(title: "Безопасно", rows: rows(.safe)),
-        ]
+        )
     }
 }

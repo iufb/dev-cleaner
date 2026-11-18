@@ -19,6 +19,10 @@ final class CleanerStore {
     var selection: Set<String> = []
     var isCleaning = false
     var cleaningTargetID: String?
+    /// Ход текущей очистки: показывается в окне подтверждения.
+    var cleanProgress: CleanProgress?
+    /// Итог последней очистки: показывается в окне подтверждения после её конца.
+    var lastReport: CleanReport?
     var useTrash = false {
         didSet { settings.useTrash = useTrash }
     }
@@ -55,6 +59,19 @@ final class CleanerStore {
         if let days = settings.minAgeDays { minAgeDays = days }
         useTrash = settings.useTrash
         log = logFile.load()
+    }
+
+    struct CleanProgress: Equatable {
+        var done: Int
+        var total: Int
+        var current: String
+    }
+
+    struct CleanReport: Equatable {
+        /// Насколько выросло свободное место на диске; `nil`, если узнать не удалось.
+        var freed: Int64?
+        var useTrash: Bool
+        var errors: [String]
     }
 
     var isBusy: Bool { isCleaning || !scanning.isEmpty || isScanningProjects }
@@ -188,25 +205,31 @@ final class CleanerStore {
         guard !chosen.isEmpty else { return }
 
         isCleaning = true
+        lastReport = nil
         let trash = useTrash
         let before = DiskInfo.freeBytes()
+        var errors: [String] = []
 
-        for target in chosen {
+        for (index, target) in chosen.enumerated() {
             cleaningTargetID = target.id
+            cleanProgress = CleanProgress(done: index, total: chosen.count, current: target.name)
             do {
                 let outcome = try await Cleaner.clean(target, useTrash: trash)
                 addLog("\(target.name): \(outcome.summary)", ok: outcome.errors.isEmpty)
                 for error in outcome.errors { addLog("\(target.name): \(error)", ok: false) }
+                errors += outcome.errors.map { "\(target.name): \($0)" }
             } catch {
-                logFailure(error, prefix: target.name)
+                errors += logFailure(error, prefix: target.name)
             }
         }
 
         cleaningTargetID = nil
+        cleanProgress = nil
         selection.removeAll()
-        isCleaning = false
         let after = DiskInfo.freeBytes()
         addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
+        lastReport = CleanReport(freed: Self.freed(before, after), useTrash: trash, errors: errors)
+        isCleaning = false
         await scanAll()
     }
 
@@ -310,9 +333,12 @@ final class CleanerStore {
         guard !chosen.isEmpty else { return }
 
         isCleaning = true
+        lastReport = nil
         let urls = chosen.map(\.url)
         let trash = useTrash
         let before = DiskInfo.freeBytes()
+        var errors: [String] = []
+        cleanProgress = CleanProgress(done: 0, total: 1, current: Format.count(urls.count, "папка", "папки", "папок"))
 
         do {
             let result = try await Task.detached(priority: .userInitiated) {
@@ -320,11 +346,15 @@ final class CleanerStore {
             }.value
             addLog("Проекты: \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
             for error in result.errors { addLog("Проекты: \(error)", ok: false) }
+            errors += result.errors
         } catch {
-            logFailure(error, prefix: "Проекты")
+            errors += logFailure(error, prefix: "Проекты")
         }
 
-        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: DiskInfo.freeBytes(), useTrash: trash), ok: true)
+        let after = DiskInfo.freeBytes()
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
+        cleanProgress = nil
+        lastReport = CleanReport(freed: Self.freed(before, after), useTrash: trash, errors: errors)
 
         let removed = Set(urls.filter { !FileManager.default.fileExists(atPath: $0.path) })
         artifacts.removeAll { removed.contains($0.url) }
@@ -333,11 +363,18 @@ final class CleanerStore {
         isCleaning = false
     }
 
-    private func logFailure(_ error: Error, prefix: String) {
-        addLog("\(prefix): \(error.localizedDescription)", ok: false)
-        for detail in (error as? Cleaner.CleanError)?.details ?? [] {
-            addLog("\(prefix): \(detail)", ok: false)
-        }
+    /// Пишет ошибку в журнал и возвращает её строки для итога очистки.
+    @discardableResult
+    private func logFailure(_ error: Error, prefix: String) -> [String] {
+        let lines = ["\(prefix): \(error.localizedDescription)"]
+            + ((error as? Cleaner.CleanError)?.details ?? []).map { "\(prefix): \($0)" }
+        for line in lines { addLog(line, ok: false) }
+        return lines
+    }
+
+    static func freed(_ before: Int64?, _ after: Int64?) -> Int64? {
+        guard let before, let after else { return nil }
+        return max(0, after - before)
     }
 
     func addLog(_ text: String, ok: Bool) {
