@@ -22,6 +22,11 @@ struct DevCleanerApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // Из Xcode и `swift run` запускается голый бинарник без .app: иконку из Info.plist
+        // macOS не видит, поэтому ставим её в Dock сами.
+        if Bundle.main.bundleURL.pathExtension != "app", let icon = AppIconArt.image() {
+            NSApp.applicationIconImage = icon
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 

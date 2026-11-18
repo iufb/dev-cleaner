@@ -13,8 +13,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/DevCleaner" "$APP/Contents/MacOS/DevCleaner"
 
-# Иконка рисуется из исходника scripts/make-icon.swift.
-swift scripts/make-icon.swift "$APP/Contents/Resources/AppIcon.icns"
+# Иконка рисуется из исходников (AppIconArt.swift).
+./scripts/make-icon.sh "$APP/Contents/Resources/AppIcon.icns"
 rm -f "$APP/Contents/Resources/AppIcon.png" "$APP/Contents/Resources/AppIcon-small.png"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'

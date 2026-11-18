@@ -54,6 +54,7 @@ struct ContentView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 260)
+            .background(SidebarSeparatorFix())
         } detail: {
             Group {
                 switch sidebar ?? .overview {
