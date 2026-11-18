@@ -206,17 +206,19 @@ struct ConfirmationSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Не получилось: \(Format.count(errors.count, "ошибка", "ошибки", "ошибок"))")
                         .font(.callout.weight(.semibold))
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
-                                Text(error)
-                                    .font(.callout)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
+                    ForEach(Array(errors.prefix(3).enumerated()), id: \.offset) { _, error in
+                        Text(error)
+                            .font(.callout)
+                            .lineLimit(4)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 160)
+                    if errors.count > 3 {
+                        Text("и ещё \(errors.count - 3) — полный текст в журнале")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(12)
                 .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))

@@ -69,11 +69,21 @@ enum Shell {
                                      environment: env, timeout: timeout)
             let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             guard result.status == 0 else {
-                let message = output.isEmpty ? "код выхода \(result.status)" : output
-                throw Failure(output: String(message.suffix(500)))
+                throw Failure(output: output.isEmpty ? "код выхода \(result.status)" : errorSummary(output))
             }
             return output
         }.value
+    }
+
+    /// Суть ошибки из вывода команды: первые строки, где обычно и стоит причина.
+    /// Хвост — это чаще всего стектрейс, по нему ничего не понять.
+    static func errorSummary(_ output: String, maxLines: Int = 4, maxLength: Int = 400) -> String {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        var text = lines.prefix(maxLines).joined(separator: "\n")
+        if text.count > maxLength { text = String(text.prefix(maxLength)) }
+        return lines.count > maxLines || text.count < lines.joined(separator: "\n").count ? text + " …" : text
     }
 
     struct TimedOut: LocalizedError {
@@ -95,6 +105,9 @@ enum Shell {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         if let environment { process.environment = environment }
+        // Текущая папка приложения может исчезнуть: при запуске из Xcode она лежит в DerivedData,
+        // которую мы же и чистим. Команды запускаем из домашней папки.
+        process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         process.standardInput = FileHandle.nullDevice
 
         let pipe = Pipe()

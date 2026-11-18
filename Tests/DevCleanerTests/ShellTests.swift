@@ -61,4 +61,26 @@ import Testing
         let d = CleanupTarget(id: "y", name: "y", detail: "", category: .web, paths: ["~/x"])
         #expect(d.requiredTool == nil)
     }
+
+    @Test func commandsRunFromHomeDirectory() async throws {
+        let pwd = try await Shell.run("pwd -P")
+        let home = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path
+        #expect(pwd == home)
+    }
+
+    @Test func errorSummaryKeepsTheCauseNotTheStackTrace() {
+        let output = """
+        node:internal/bootstrap/switches/does_own_process_state:142
+            cachedCwd = rawMethods.cwd();
+        Error: ENOENT: no such file or directory, uv_cwd
+            at process.wrappedCwd (node:internal/bootstrap/switches/does_own_process_state:142:28)
+            at Module._compile (node:internal/modules/cjs/loader:1929:14)
+            at Module.load (node:internal/modules/cjs/loader:1651:32)
+        """
+        let summary = Shell.errorSummary(output)
+        #expect(summary.contains("ENOENT"))
+        #expect(!summary.contains("Module.load"))
+        #expect(summary.hasSuffix("…"))
+        #expect(Shell.errorSummary("ERR_PNPM_NO_STORE") == "ERR_PNPM_NO_STORE")
+    }
 }
