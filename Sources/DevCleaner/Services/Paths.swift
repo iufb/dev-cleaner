@@ -14,4 +14,12 @@ enum Paths {
         guard parent.path != path else { return path }
         return (canonical(parent) as NSString).appendingPathComponent(url.lastPathComponent)
     }
+
+    /// Путь для показа человеку: домашняя папка заменяется на `~`.
+    static func display(_ url: URL, home: String = NSHomeDirectory()) -> String {
+        let path = url.standardizedFileURL.path
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
+    }
 }

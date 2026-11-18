@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Одна «цель» очистки: кэш, папка или команда.
 struct CleanupTarget: Identifiable, Hashable, Sendable {
@@ -24,6 +25,17 @@ struct CleanupTarget: Identifiable, Hashable, Sendable {
             case .languages: "Rust, Go, Maven, NuGet"
             case .agents: "Модели, Python-кэши, логи агентов и редакторов"
             case .system: "Логи, корзина, бэкапы iOS-устройств"
+            }
+        }
+
+        /// Цвет категории в составной полосе и легенде сводки.
+        var color: Color {
+            switch self {
+            case .mobile: .blue
+            case .web: .green
+            case .languages: .pink
+            case .agents: .purple
+            case .system: .gray
             }
         }
 

@@ -19,6 +19,10 @@ final class CleanerStore {
     var selection: Set<String> = []
     var isCleaning = false
     var cleaningTargetID: String?
+    /// Ход текущей очистки: показывается в окне подтверждения.
+    var cleanProgress: CleanProgress?
+    /// Итог последней очистки: показывается в окне подтверждения после её конца.
+    var lastReport: CleanReport?
     var useTrash = false {
         didSet { settings.useTrash = useTrash }
     }
@@ -37,10 +41,14 @@ final class CleanerStore {
     var projectSelection: Set<URL> = []
     var isScanningProjects = false
     var didScanProjects = false
+    /// Показывать только эти типы артефактов; пусто — все.
+    var kindFilter: Set<String> = []
     var minAgeDays = 30 {
         didSet { settings.minAgeDays = minAgeDays }
     }
 
+    /// Запуск очистки, к которому сейчас пишутся записи журнала.
+    @ObservationIgnored private var currentRunID: UUID?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var scanGeneration: UUID?
     @ObservationIgnored private let settings: Settings
@@ -53,6 +61,19 @@ final class CleanerStore {
         if let days = settings.minAgeDays { minAgeDays = days }
         useTrash = settings.useTrash
         log = logFile.load()
+    }
+
+    struct CleanProgress: Equatable {
+        var done: Int
+        var total: Int
+        var current: String
+    }
+
+    struct CleanReport: Equatable {
+        /// Насколько выросло свободное место на диске; `nil`, если узнать не удалось.
+        var freed: Int64?
+        var useTrash: Bool
+        var errors: [String]
     }
 
     var isBusy: Bool { isCleaning || !scanning.isEmpty || isScanningProjects }
@@ -107,6 +128,52 @@ final class CleanerStore {
         targets.reduce(0) { $0 + size(of: $1) }
     }
 
+    /// Что можно освободить без риска: ровно то, что выбирает `selectSafe()`.
+    var safeTargets: [CleanupTarget] {
+        targets.filter { $0.risk == .safe && size(of: $0) > 0 }
+    }
+
+    /// «Осторожные» цели, которые реально что-то занимают.
+    var cautionTargets: [CleanupTarget] {
+        targets.filter { $0.risk == .caution && size(of: $0) > 0 }
+    }
+
+    struct TargetGroups {
+        var safe: [CleanupTarget] = []
+        var caution: [CleanupTarget] = []
+        /// Пустые, отсутствующие и неустановленные: показываются свёрнутыми.
+        var inactive: [CleanupTarget] = []
+    }
+
+    /// Есть ли что чистить: папка не пустая или это установленная команда без путей для подсчёта.
+    func isActive(_ target: CleanupTarget) -> Bool {
+        guard isAvailable(target) else { return false }
+        if target.isCommand && target.paths.isEmpty { return true }
+        return size(of: target) > 0
+    }
+
+    /// Цели категории по группам риска; внутри группы по размеру, команды без размера в конце.
+    func groups(in category: CleanupTarget.Category) -> TargetGroups {
+        var result = TargetGroups()
+        let items = targets.enumerated()
+            .filter { $0.element.category == category }
+            .sorted { lhs, rhs in
+                let (a, b) = (size(of: lhs.element), size(of: rhs.element))
+                return a != b ? a > b : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+        for target in items {
+            if !isActive(target) {
+                result.inactive.append(target)
+            } else if target.risk == .safe {
+                result.safe.append(target)
+            } else {
+                result.caution.append(target)
+            }
+        }
+        return result
+    }
+
     var selectedTargets: [CleanupTarget] {
         targets.filter { selection.contains($0.id) }
     }
@@ -122,8 +189,8 @@ final class CleanerStore {
     }
 
     func selectSafe(in category: CleanupTarget.Category? = nil) {
-        for target in targets where target.risk == .safe && (category == nil || target.category == category) {
-            if size(of: target) > 0 { selection.insert(target.id) }
+        for target in safeTargets where category == nil || target.category == category {
+            selection.insert(target.id)
         }
     }
 
@@ -140,32 +207,87 @@ final class CleanerStore {
         guard !chosen.isEmpty else { return }
 
         isCleaning = true
+        lastReport = nil
+        currentRunID = UUID()
+        defer { currentRunID = nil }
         let trash = useTrash
         let before = DiskInfo.freeBytes()
+        var errors: [String] = []
 
-        for target in chosen {
+        for (index, target) in chosen.enumerated() {
             cleaningTargetID = target.id
+            cleanProgress = CleanProgress(done: index, total: chosen.count, current: target.name)
             do {
                 let outcome = try await Cleaner.clean(target, useTrash: trash)
                 addLog("\(target.name): \(outcome.summary)", ok: outcome.errors.isEmpty)
                 for error in outcome.errors { addLog("\(target.name): \(error)", ok: false) }
+                errors += outcome.errors.map { "\(target.name): \($0)" }
             } catch {
-                logFailure(error, prefix: target.name)
+                errors += logFailure(error, prefix: target.name)
             }
         }
 
         cleaningTargetID = nil
+        cleanProgress = nil
         selection.removeAll()
-        isCleaning = false
         let after = DiskInfo.freeBytes()
-        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true)
+        let freed = Self.freed(before, after)
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true,
+               run: .init(scope: "Кэши", items: chosen.count, useTrash: trash, freed: freed))
+        lastReport = CleanReport(freed: freed, useTrash: trash, errors: errors)
+        isCleaning = false
         await scanAll()
     }
 
     // MARK: - Проекты
 
     var filteredArtifacts: [ProjectArtifact] {
-        artifacts.filter { $0.ageDays >= minAgeDays }.sorted { $0.size > $1.size }
+        ageFilteredArtifacts
+            .filter { kindFilter.isEmpty || kindFilter.contains($0.kind) }
+            .sorted { $0.size > $1.size }
+    }
+
+    private var ageFilteredArtifacts: [ProjectArtifact] {
+        artifacts.filter { $0.ageDays >= minAgeDays }
+    }
+
+    /// Типы артефактов, которые есть среди найденного (с учётом возраста), крупные первыми.
+    var artifactKinds: [String] {
+        var sizes: [String: Int64] = [:]
+        for artifact in ageFilteredArtifacts { sizes[artifact.kind, default: 0] += artifact.size }
+        return sizes.keys.sorted { a, b in
+            let (sa, sb) = (sizes[a] ?? 0, sizes[b] ?? 0)
+            return sa != sb ? sa > sb : a < b
+        }
+    }
+
+    enum ArtifactGrouping: Hashable { case project, kind }
+
+    struct ArtifactGroup: Identifiable {
+        let id: String
+        let title: String
+        /// Папка проекта; для группировки по типу — `nil`.
+        let projectURL: URL?
+        let items: [ProjectArtifact]
+        var size: Int64 { items.reduce(0) { $0 + $1.size } }
+        var lastTouched: Date { items.map(\.lastTouched).max() ?? .distantPast }
+    }
+
+    /// Найденное с учётом фильтров, сгруппированное по проекту или по типу. Группы и строки — по размеру.
+    func artifactGroups(by grouping: ArtifactGrouping) -> [ArtifactGroup] {
+        let items = filteredArtifacts
+        let groups: [ArtifactGroup]
+        switch grouping {
+        case .project:
+            groups = Dictionary(grouping: items, by: \.projectURL).map { url, items in
+                ArtifactGroup(id: url.path, title: url.lastPathComponent, projectURL: url, items: items)
+            }
+        case .kind:
+            groups = Dictionary(grouping: items, by: \.kind).map { kind, items in
+                ArtifactGroup(id: kind, title: kind, projectURL: nil, items: items)
+            }
+        }
+        return groups.sorted { $0.size != $1.size ? $0.size > $1.size : $0.id < $1.id }
     }
 
     var selectedArtifacts: [ProjectArtifact] {
@@ -217,9 +339,14 @@ final class CleanerStore {
         guard !chosen.isEmpty else { return }
 
         isCleaning = true
+        lastReport = nil
+        currentRunID = UUID()
+        defer { currentRunID = nil }
         let urls = chosen.map(\.url)
         let trash = useTrash
         let before = DiskInfo.freeBytes()
+        var errors: [String] = []
+        cleanProgress = CleanProgress(done: 0, total: 1, current: Format.count(urls.count, "папка", "папки", "папок"))
 
         do {
             let result = try await Task.detached(priority: .userInitiated) {
@@ -227,11 +354,17 @@ final class CleanerStore {
             }.value
             addLog("Проекты: \(result.removed) папок, \(result.summary)", ok: result.errors.isEmpty)
             for error in result.errors { addLog("Проекты: \(error)", ok: false) }
+            errors += result.errors
         } catch {
-            logFailure(error, prefix: "Проекты")
+            errors += logFailure(error, prefix: "Проекты")
         }
 
-        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: DiskInfo.freeBytes(), useTrash: trash), ok: true)
+        let after = DiskInfo.freeBytes()
+        let freed = Self.freed(before, after)
+        addLog(Cleaner.totalLine(freeBefore: before, freeAfter: after, useTrash: trash), ok: true,
+               run: .init(scope: "Проекты", items: chosen.count, useTrash: trash, freed: freed))
+        cleanProgress = nil
+        lastReport = CleanReport(freed: freed, useTrash: trash, errors: errors)
 
         let removed = Set(urls.filter { !FileManager.default.fileExists(atPath: $0.path) })
         artifacts.removeAll { removed.contains($0.url) }
@@ -240,15 +373,22 @@ final class CleanerStore {
         isCleaning = false
     }
 
-    private func logFailure(_ error: Error, prefix: String) {
-        addLog("\(prefix): \(error.localizedDescription)", ok: false)
-        for detail in (error as? Cleaner.CleanError)?.details ?? [] {
-            addLog("\(prefix): \(detail)", ok: false)
-        }
+    /// Пишет ошибку в журнал и возвращает её строки для итога очистки.
+    @discardableResult
+    private func logFailure(_ error: Error, prefix: String) -> [String] {
+        let lines = ["\(prefix): \(error.localizedDescription)"]
+            + ((error as? Cleaner.CleanError)?.details ?? []).map { "\(prefix): \($0)" }
+        for line in lines { addLog(line, ok: false) }
+        return lines
     }
 
-    func addLog(_ text: String, ok: Bool) {
-        log.insert(LogEntry(text: text, ok: ok), at: 0)
+    static func freed(_ before: Int64?, _ after: Int64?) -> Int64? {
+        guard let before, let after else { return nil }
+        return max(0, after - before)
+    }
+
+    func addLog(_ text: String, ok: Bool, run: LogEntry.RunInfo? = nil) {
+        log.insert(LogEntry(text: text, ok: ok, runID: currentRunID, run: run), at: 0)
         if log.count > LogFile.limit { log.removeLast(log.count - LogFile.limit) }
     }
 

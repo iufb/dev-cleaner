@@ -52,11 +52,40 @@ struct LogEntry: Identifiable, Codable, Equatable, Sendable {
     var date = Date()
     let text: String
     let ok: Bool
+    /// Запуск очистки, к которому относится запись. У записей старых версий — `nil`.
+    var runID: UUID? = nil
+    /// Сводка запуска: есть только у итоговой записи.
+    var run: RunInfo? = nil
+
+    struct RunInfo: Codable, Equatable, Sendable {
+        /// «Кэши» или «Проекты».
+        var scope: String
+        var items: Int
+        var useTrash: Bool
+        /// Насколько выросло свободное место; `nil`, если узнать не удалось.
+        var freed: Int64?
+    }
 }
 
 enum Format {
     static func bytes(_ value: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+        // Интерфейс на русском, поэтому и единицы русские («ГБ», а не «GB»), и ноль — числом.
+        value.formatted(.byteCount(style: .file, spellsOutZero: false).locale(Locale(identifier: "ru_RU")))
+    }
+
+    /// «3 дня назад», «в прошлом месяце»: относительная дата по-русски, как и остальной интерфейс.
+    static func relative(_ date: Date, now: Date = .now) -> String {
+        date.formatted(.relative(presentation: .named).locale(Locale(identifier: "ru_RU")))
+    }
+
+    /// «1 папка», «3 папки», «5 папок»: русское склонение по числу.
+    static func count(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        let mod100 = n % 100, mod10 = n % 10
+        let word = (11...14).contains(mod100) ? many
+            : mod10 == 1 ? one
+            : (2...4).contains(mod10) ? few
+            : many
+        return "\(n) \(word)"
     }
 
     /// «Очистить 3,2 ГБ», а если размер неизвестен (только команды) — «Очистить (2)».

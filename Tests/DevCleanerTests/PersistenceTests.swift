@@ -109,4 +109,37 @@ import Testing
         #expect(store.artifacts.count == 1)
         #expect(!store.isScanningProjects)
     }
+
+    @Test func logGroupsByRunAndKeepsLegacyEntries() throws {
+        let tmp = try TempDir()
+        let file = LogFile(url: tmp.url.appendingPathComponent("log.json"))
+        // Запись старого формата: без runID и run.
+        let legacy = #"[{"id":"\#(UUID().uuidString)","date":0,"text":"Старое","ok":true}]"#
+        try Data(legacy.utf8).write(to: file.url)
+        let old = file.load()
+        #expect(old.count == 1)
+        #expect(old[0].runID == nil)
+
+        let first = UUID(), second = UUID()
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        // Журнал хранится новыми записями вперёд.
+        let log: [LogEntry] = [
+            LogEntry(date: t0.addingTimeInterval(20), text: "Итого 2", ok: true, runID: second,
+                     run: .init(scope: "Проекты", items: 1, useTrash: true, freed: 0)),
+            LogEntry(date: t0.addingTimeInterval(19), text: "ошибка", ok: false, runID: second),
+            LogEntry(date: t0.addingTimeInterval(11), text: "Итого 1", ok: true, runID: first,
+                     run: .init(scope: "Кэши", items: 2, useTrash: false, freed: 100)),
+            LogEntry(date: t0.addingTimeInterval(10), text: "шаг", ok: true, runID: first),
+        ] + old
+
+        let runs = LogRun.runs(from: log)
+        #expect(runs.map(\.id) == [second, first, nil])
+        #expect(runs[0].errors.count == 1)
+        #expect(runs[1].entries.map(\.text) == ["шаг", "Итого 1"])
+        #expect(runs[1].info?.freed == 100)
+        #expect(runs[2].isLegacy)
+
+        file.save(log)
+        #expect(file.load() == log)
+    }
 }
