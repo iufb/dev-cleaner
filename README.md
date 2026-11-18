@@ -9,11 +9,16 @@
 ```bash
 cd DevCleaner
 swift run                 # быстрый запуск
-open Package.swift        # или открыть в Xcode и нажать ⌘R
+xcodegen generate         # создать DevCleaner.xcodeproj из project.yml
+open DevCleaner.xcodeproj # открыть в Xcode и нажать ⌘R
 ./scripts/build-app.sh    # собрать build/DevCleaner.app (с иконкой)
 swift test                # тесты
-./scripts/make-icon.sh build/AppIcon.icns         # только иконка
+./scripts/make-icon.sh Resources/Assets.xcassets/AppIcon.appiconset   # иконка для Xcode-проекта
 ```
+
+`DevCleaner.xcodeproj` не хранится в git: он генерируется [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+из `project.yml` (`brew install xcodegen`). Из проекта Xcode собирает и запускает настоящий
+`DevCleaner.app` с иконкой. `Package.swift` остаётся для `swift build`, `swift test` и `build-app.sh`.
 
 Приложение не в песочнице: ему нужен доступ к `~/Library`, `~/.gradle` и т. п.
 Для очистки Корзины и бэкапов iOS выдайте собранному `.app` доступ в
@@ -72,5 +77,7 @@ Sources/DevCleaner/
   Services/                  SizeCalculator, Cleaner, ProjectScanner, Shell, FullDiskAccess, Paths
   Store/                     CleanerStore (@Observable-состояние), сохранение журнала и настроек
   Views/                     сайдбар, сводка с полосой занятого места, плашка выбора, списки, таблица проектов, журнал, подтверждение
+Resources/Assets.xcassets/   иконка для Xcode-проекта (генерируется scripts/make-icon.sh)
+project.yml                  описание Xcode-проекта для XcodeGen
 Tests/DevCleanerTests/       swift test: удаление, сканер, правила, размеры, shell, каталог
 ```
