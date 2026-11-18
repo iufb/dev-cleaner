@@ -117,6 +117,42 @@ final class CleanerStore {
         targets.filter { $0.risk == .caution && size(of: $0) > 0 }
     }
 
+    struct TargetGroups {
+        var safe: [CleanupTarget] = []
+        var caution: [CleanupTarget] = []
+        /// Пустые, отсутствующие и неустановленные: показываются свёрнутыми.
+        var inactive: [CleanupTarget] = []
+    }
+
+    /// Есть ли что чистить: папка не пустая или это установленная команда без путей для подсчёта.
+    func isActive(_ target: CleanupTarget) -> Bool {
+        guard isAvailable(target) else { return false }
+        if target.isCommand && target.paths.isEmpty { return true }
+        return size(of: target) > 0
+    }
+
+    /// Цели категории по группам риска; внутри группы по размеру, команды без размера в конце.
+    func groups(in category: CleanupTarget.Category) -> TargetGroups {
+        var result = TargetGroups()
+        let items = targets.enumerated()
+            .filter { $0.element.category == category }
+            .sorted { lhs, rhs in
+                let (a, b) = (size(of: lhs.element), size(of: rhs.element))
+                return a != b ? a > b : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+        for target in items {
+            if !isActive(target) {
+                result.inactive.append(target)
+            } else if target.risk == .safe {
+                result.safe.append(target)
+            } else {
+                result.caution.append(target)
+            }
+        }
+        return result
+    }
+
     var selectedTargets: [CleanupTarget] {
         targets.filter { selection.contains($0.id) }
     }
