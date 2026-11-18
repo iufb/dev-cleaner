@@ -182,26 +182,41 @@ struct ProjectsView: View {
                                        ? "В \(Paths.display(store.projectRoot)) нет артефактов сборки."
                                        : "Под фильтры ничего не попало. Попробуйте «Не трогали: Любые» или другой тип."))
         } else {
-            List {
-                ForEach(store.artifactGroups(by: grouping)) { group in
-                    DisclosureGroup(isExpanded: expansion(group.id)) {
-                        ForEach(group.items) { artifact in
-                            ArtifactRow(artifact: artifact, showProject: grouping == .kind)
+            CardPage {
+                RowCard(items: listItems) { item in
+                    switch item {
+                    case .group(let group, let open):
+                        ArtifactGroupRow(group: group, expanded: open) {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                if open { expanded.remove(group.id) } else { expanded.insert(group.id) }
+                            }
                         }
-                    } label: {
-                        ArtifactGroupRow(group: group)
+                    case .artifact(let artifact):
+                        ArtifactRow(artifact: artifact, showProject: grouping == .kind)
                     }
                 }
             }
-            .listStyle(.inset)
         }
     }
 
-    private func expansion(_ id: String) -> Binding<Bool> {
-        Binding(
-            get: { expanded.contains(id) },
-            set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } }
-        )
+    /// Строки карточки: группы и, у раскрытых, их артефакты.
+    private enum ListItem: Identifiable {
+        case group(CleanerStore.ArtifactGroup, open: Bool)
+        case artifact(ProjectArtifact)
+
+        var id: String {
+            switch self {
+            case .group(let group, _): "group:" + group.id
+            case .artifact(let artifact): "item:" + artifact.url.path
+            }
+        }
+    }
+
+    private var listItems: [ListItem] {
+        store.artifactGroups(by: grouping).flatMap { group -> [ListItem] in
+            let open = expanded.contains(group.id)
+            return [.group(group, open: open)] + (open ? group.items.map(ListItem.artifact) : [])
+        }
     }
 
     private func pickFolder() {
@@ -217,12 +232,17 @@ struct ProjectsView: View {
     }
 }
 
-/// Строка группы: проект (путь, когда трогали) или тип (сколько проектов). Галочка на всю группу.
+/// Строка группы: проект (типы чипами, папка, когда трогали) или тип (в скольких проектах).
+/// Галочка выбирает всю группу, клик по строке раскрывает её.
 private struct ArtifactGroupRow: View {
     let group: CleanerStore.ArtifactGroup
+    let expanded: Bool
+    let toggle: () -> Void
     @Environment(CleanerStore.self) private var store
 
     var body: some View {
+        let chosen = group.items.filter { store.projectSelection.contains($0.id) }.count
+
         HStack(spacing: 10) {
             Toggle(sources: bindings, isOn: \.self) { EmptyView() }
                 .toggleStyle(.checkbox)
@@ -230,16 +250,25 @@ private struct ArtifactGroupRow: View {
                 .disabled(store.isCleaning)
                 .accessibilityLabel(group.title)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(group.title)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-                    .layoutPriority(1)
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .layoutPriority(2)
+                if let url = group.projectURL {
+                    ForEach(kinds.prefix(3), id: \.self) { Tag(text: $0) }
+                    if kinds.count > 3 { Tag(text: "+\(kinds.count - 3)") }
+                    Text(Paths.display(url.deletingLastPathComponent()))
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("в " + Format.count(group.items.count, "проекте", "проектах", "проектах"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 12)
@@ -248,28 +277,27 @@ private struct ArtifactGroupRow: View {
                 Text(Format.relative(group.lastTouched))
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
                     .help("Последнее изменение в проекте, без артефактов и .git")
             }
-            Text(Format.bytes(group.size))
-                .fontWeight(.semibold)
-                .monospacedDigit()
+            SizeText(bytes: group.size)
                 .frame(minWidth: 76, alignment: .trailing)
+            DisclosureChevron(expanded: expanded)
         }
-        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+        .help(group.projectURL?.path ?? group.title)
         .contextMenu {
+            Button(expanded ? "Свернуть" : "Раскрыть", action: toggle)
             Button("Показать в Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting(group.projectURL.map { [$0] } ?? group.items.map(\.url))
             }
         }
+        .rowChrome(selected: chosen > 0 && chosen == group.items.count)
     }
 
-    private var subtitle: String {
-        if let url = group.projectURL {
-            let kinds = group.items.map(\.kind).joined(separator: ", ")
-            return "\(kinds) · \(Paths.display(url.deletingLastPathComponent()))"
-        }
-        return "в " + Format.count(group.items.count, "проекте", "проектах", "проектах")
-    }
+    private var kinds: [String] { group.items.map(\.kind) }
 
     private var bindings: [Binding<Bool>] {
         group.items.map { artifact in
@@ -283,7 +311,7 @@ private struct ArtifactGroupRow: View {
     }
 }
 
-/// Строка артефакта в одну линию, как строка цели в категориях.
+/// Строка артефакта внутри группы: с отступом, в одну линию, как строка цели в категориях.
 private struct ArtifactRow: View {
     let artifact: ProjectArtifact
     let showProject: Bool
@@ -306,16 +334,28 @@ private struct ArtifactRow: View {
                 .disabled(store.isCleaning)
                 .accessibilityLabel("\(artifact.projectName), \(artifact.kind)")
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(showProject ? artifact.projectName : artifact.kind)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Text(Paths.display(artifact.url))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            HStack(alignment: .center, spacing: 8) {
+                if showProject {
+                    // По типу: строка — проект, папку проекта видно рядом.
+                    Text(artifact.projectName)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Text(Paths.display(artifact.projectURL.deletingLastPathComponent()))
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    // По проектам: путь проекта уже в строке группы, здесь только тип и имя папки.
+                    Tag(text: artifact.kind)
+                    if artifact.url.lastPathComponent != artifact.kind {
+                        Text(artifact.url.lastPathComponent)
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
             }
 
             Spacer(minLength: 12)
@@ -324,27 +364,18 @@ private struct ArtifactRow: View {
                 Text(Format.relative(artifact.lastTouched))
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            Text(Format.bytes(artifact.size))
-                .monospacedDigit()
+            SizeText(bytes: artifact.size)
                 .frame(minWidth: 76, alignment: .trailing)
-
-            Menu {
-                actions
-            } label: {
-                MoreMenuLabel()
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Действия")
-            .accessibilityLabel("Действия с \(artifact.kind)")
+            RowMenu(label: "Действия с \(artifact.kind)") { actions }
         }
-        .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture { if !store.isCleaning { isOn.wrappedValue.toggle() } }
         .help(artifact.url.path)
         .contextMenu { actions }
+        .rowChrome(selected: isOn.wrappedValue, indent: 26)
     }
 
     @ViewBuilder

@@ -10,44 +10,48 @@ struct TargetListView: View {
     var body: some View {
         let groups = store.groups(in: category)
 
-        List {
+        CardPage {
             if category == .system && !store.hasFullDiskAccess {
-                Section { FullDiskAccessBanner() }
+                Card { FullDiskAccessBanner().rowChrome(hoverable: false) }
             }
 
             if !groups.safe.isEmpty {
-                Section {
-                    ForEach(groups.safe) { TargetRow(target: $0) }
-                } header: {
-                    GroupHeader(title: "Безопасно · восстановится само", targets: groups.safe, selectable: true)
-                }
+                RowCard(
+                    title: "Безопасно · восстановится само",
+                    leading: AnyView(GroupCheckbox(targets: groups.safe)),
+                    trailing: AnyView(GroupSummary(targets: groups.safe)),
+                    items: groups.safe
+                ) { TargetRow(target: $0) }
             }
 
             if !groups.caution.isEmpty {
-                Section {
-                    ForEach(groups.caution) { TargetRow(target: $0) }
-                } header: {
-                    GroupHeader(title: "Осторожно · долго или нельзя восстановить", targets: groups.caution, selectable: false)
-                }
+                RowCard(
+                    title: "Осторожно · долго или нельзя восстановить",
+                    leading: AnyView(Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)),
+                    trailing: AnyView(GroupSummary(targets: groups.caution)),
+                    items: groups.caution
+                ) { TargetRow(target: $0) }
             }
 
             if groups.safe.isEmpty && groups.caution.isEmpty && store.scanning.isEmpty {
-                Section {
+                Card {
                     Label("В этой категории сейчас нечего чистить.", systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .rowChrome(hoverable: false)
                 }
             }
 
             if !groups.inactive.isEmpty {
-                Section {
-                    DisclosureGroup(isExpanded: $showInactive) {
-                        ForEach(groups.inactive) { TargetRow(target: $0) }
-                    } label: {
-                        Text("Пустые и не установленные · \(groups.inactive.count)")
-                            .foregroundStyle(.secondary)
+                RowCard(
+                    top: AnyView(
+                        FoldRow(title: "Пустые и не установленные · \(groups.inactive.count)", expanded: $showInactive)
                             .help(groups.inactive.map(\.name).joined(separator: ", "))
-                    }
-                }
+                    ),
+                    items: showInactive ? groups.inactive : []
+                ) { TargetRow(target: $0) }
             }
         }
         .navigationTitle(category.title)
@@ -55,36 +59,17 @@ struct TargetListView: View {
     }
 }
 
-/// Заголовок группы: сумма, сколько выбрано и, для безопасного, общая галочка.
-private struct GroupHeader: View {
-    let title: String
+/// Общая галочка группы: с промежуточным состоянием, когда выбрана часть.
+private struct GroupCheckbox: View {
     let targets: [CleanupTarget]
-    let selectable: Bool
     @Environment(CleanerStore.self) private var store
 
     var body: some View {
-        let total = targets.reduce(0) { $0 + store.size(of: $1) }
-        let chosen = targets.filter { store.selection.contains($0.id) }
-
-        HStack(spacing: 8) {
-            if selectable {
-                Toggle(sources: bindings, isOn: \.self) { EmptyView() }
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .disabled(store.isCleaning)
-                    .help("Выбрать или снять всю группу")
-            }
-            Text(title)
-            Spacer()
-            Group {
-                if chosen.isEmpty {
-                    Text(Format.bytes(total))
-                } else {
-                    Text("выбрано \(chosen.count) из \(targets.count) · \(Format.bytes(total))")
-                }
-            }
-            .monospacedDigit()
-        }
+        Toggle(sources: bindings, isOn: \.self) { EmptyView() }
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .disabled(store.isCleaning)
+            .help("Выбрать или снять всю группу")
     }
 
     private var bindings: [Binding<Bool>] {
@@ -94,6 +79,18 @@ private struct GroupHeader: View {
                 set: { store.setSelected(target.id, $0) }
             )
         }
+    }
+}
+
+/// Сумма группы и сколько выбрано.
+private struct GroupSummary: View {
+    let targets: [CleanupTarget]
+    @Environment(CleanerStore.self) private var store
+
+    var body: some View {
+        let total = Format.bytes(targets.reduce(0) { $0 + store.size(of: $1) })
+        let chosen = targets.filter { store.selection.contains($0.id) }.count
+        Text(chosen == 0 ? total : "выбрано \(chosen) из \(targets.count) · \(total)")
     }
 }
 
@@ -114,7 +111,6 @@ private struct FullDiskAccessBanner: View {
             Button("Открыть настройки") { FullDiskAccess.openSettings() }
                 .buttonStyle(.secondary)
         }
-        .padding(.vertical, 6)
     }
 }
 
@@ -144,10 +140,8 @@ struct TargetRow: View {
                     .lineLimit(1)
                     .layoutPriority(1)
                 if target.isCommand {
-                    Image(systemName: "terminal")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("команда")
+                    Tag(text: "команда")
+                        .help("Очищается командой: \(target.displayLocation)")
                 }
                 Text(target.detail)
                     .font(.callout)
@@ -161,24 +155,15 @@ struct TargetRow: View {
             sizeLabel
                 .frame(minWidth: 76, alignment: .trailing)
 
-            Menu {
-                actions
-            } label: {
-                MoreMenuLabel()
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Действия")
-            .accessibilityLabel("Действия с «\(target.name)»")
+            RowMenu(label: "Действия с «\(target.name)»") { actions }
         }
-        .padding(.vertical, 3)
         .contentShape(Rectangle())
         // Строка целиком — область нажатия, как у чекбокса с подписью.
         .onTapGesture { if canToggle { isOn.wrappedValue.toggle() } }
         .opacity(store.isAvailable(target) ? 1 : 0.55)
         .help("\(target.detail)\n\n\(target.displayLocation)")
         .contextMenu { actions }
+        .rowChrome(selected: isOn.wrappedValue)
     }
 
     @ViewBuilder
@@ -216,9 +201,7 @@ struct TargetRow: View {
         } else if existsOnDisk, store.size(of: target) == 0 {
             Text("пусто").foregroundStyle(.tertiary)
         } else if existsOnDisk {
-            Text(Format.bytes(store.size(of: target)))
-                .monospacedDigit()
-                .fontWeight(store.size(of: target) > 1_000_000_000 ? .semibold : .regular)
+            SizeText(bytes: store.size(of: target))
         } else {
             Text("нет").foregroundStyle(.tertiary)
         }
