@@ -37,6 +37,8 @@ final class CleanerStore {
     var projectSelection: Set<URL> = []
     var isScanningProjects = false
     var didScanProjects = false
+    /// Показывать только эти типы артефактов; пусто — все.
+    var kindFilter: Set<String> = []
     var minAgeDays = 30 {
         didSet { settings.minAgeDays = minAgeDays }
     }
@@ -211,7 +213,52 @@ final class CleanerStore {
     // MARK: - Проекты
 
     var filteredArtifacts: [ProjectArtifact] {
-        artifacts.filter { $0.ageDays >= minAgeDays }.sorted { $0.size > $1.size }
+        ageFilteredArtifacts
+            .filter { kindFilter.isEmpty || kindFilter.contains($0.kind) }
+            .sorted { $0.size > $1.size }
+    }
+
+    private var ageFilteredArtifacts: [ProjectArtifact] {
+        artifacts.filter { $0.ageDays >= minAgeDays }
+    }
+
+    /// Типы артефактов, которые есть среди найденного (с учётом возраста), крупные первыми.
+    var artifactKinds: [String] {
+        var sizes: [String: Int64] = [:]
+        for artifact in ageFilteredArtifacts { sizes[artifact.kind, default: 0] += artifact.size }
+        return sizes.keys.sorted { a, b in
+            let (sa, sb) = (sizes[a] ?? 0, sizes[b] ?? 0)
+            return sa != sb ? sa > sb : a < b
+        }
+    }
+
+    enum ArtifactGrouping: Hashable { case project, kind }
+
+    struct ArtifactGroup: Identifiable {
+        let id: String
+        let title: String
+        /// Папка проекта; для группировки по типу — `nil`.
+        let projectURL: URL?
+        let items: [ProjectArtifact]
+        var size: Int64 { items.reduce(0) { $0 + $1.size } }
+        var lastTouched: Date { items.map(\.lastTouched).max() ?? .distantPast }
+    }
+
+    /// Найденное с учётом фильтров, сгруппированное по проекту или по типу. Группы и строки — по размеру.
+    func artifactGroups(by grouping: ArtifactGrouping) -> [ArtifactGroup] {
+        let items = filteredArtifacts
+        let groups: [ArtifactGroup]
+        switch grouping {
+        case .project:
+            groups = Dictionary(grouping: items, by: \.projectURL).map { url, items in
+                ArtifactGroup(id: url.path, title: url.lastPathComponent, projectURL: url, items: items)
+            }
+        case .kind:
+            groups = Dictionary(grouping: items, by: \.kind).map { kind, items in
+                ArtifactGroup(id: kind, title: kind, projectURL: nil, items: items)
+            }
+        }
+        return groups.sorted { $0.size != $1.size ? $0.size > $1.size : $0.id < $1.id }
     }
 
     var selectedArtifacts: [ProjectArtifact] {

@@ -97,4 +97,33 @@ import Testing
         }
         #expect(count == 2)
     }
+
+    @MainActor @Test func artifactsGroupByProjectAndKind() throws {
+        let tmp = try TempDir()
+        let store = CleanerStore(defaults: UserDefaults(suiteName: "DevCleanerTests-\(UUID().uuidString)")!,
+                                 logFile: LogFile(url: tmp.url.appendingPathComponent("log.json")))
+        store.minAgeDays = 0
+        func artifact(_ path: String, _ kind: String, _ size: Int64) -> ProjectArtifact {
+            ProjectArtifact(url: URL(fileURLWithPath: path), kind: kind, size: size, lastTouched: .now)
+        }
+        store.artifacts = [
+            artifact("/p/a/node_modules", "node_modules", 100),
+            artifact("/p/a/.next", ".next", 10),
+            artifact("/p/b/node_modules", "node_modules", 50),
+            artifact("/p/c/Pods", "Pods", 300),
+        ]
+
+        let byProject = store.artifactGroups(by: .project)
+        #expect(byProject.map(\.title) == ["c", "a", "b"])
+        #expect(byProject[1].items.map(\.kind) == ["node_modules", ".next"])
+        #expect(byProject[1].size == 110)
+
+        let byKind = store.artifactGroups(by: .kind)
+        #expect(byKind.map(\.title) == ["Pods", "node_modules", ".next"])
+        #expect(byKind[1].items.count == 2)
+
+        store.kindFilter = ["node_modules"]
+        #expect(store.artifactGroups(by: .project).map(\.title) == ["a", "b"])
+        #expect(store.artifactKinds == ["Pods", "node_modules", ".next"])
+    }
 }

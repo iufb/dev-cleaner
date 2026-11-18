@@ -60,6 +60,11 @@ enum Format {
         value.formatted(.byteCount(style: .file, spellsOutZero: false).locale(Locale(identifier: "ru_RU")))
     }
 
+    /// «3 дня назад», «в прошлом месяце»: относительная дата по-русски, как и остальной интерфейс.
+    static func relative(_ date: Date, now: Date = .now) -> String {
+        date.formatted(.relative(presentation: .named).locale(Locale(identifier: "ru_RU")))
+    }
+
     /// «1 папка», «3 папки», «5 папок»: русское склонение по числу.
     static func count(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
         let mod100 = n % 100, mod10 = n % 10

@@ -53,4 +53,9 @@ import Testing
         #expect(Paths.display(URL(fileURLWithPath: "/Users/me"), home: "/Users/me") == "~")
         #expect(Paths.display(URL(fileURLWithPath: "/Users/meow"), home: "/Users/me") == "/Users/meow")
     }
+
+    @Test func relativeDateIsRussian() {
+        let text = Format.relative(Date.now.addingTimeInterval(-3 * 86_400))
+        #expect(text.contains("назад"))
+    }
 }
