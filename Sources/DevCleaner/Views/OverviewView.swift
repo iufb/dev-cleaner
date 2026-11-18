@@ -69,8 +69,7 @@ struct OverviewView: View {
             }
             Spacer()
             Button("Выбрать безопасное") { store.selectSafe() }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.secondary)
                 .disabled(isMeasuring || store.isCleaning || store.safeTargets.isEmpty || allSafeSelected)
         }
     }
@@ -116,6 +115,7 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
             } else if !targets.isEmpty {
                 Button("Выбрать") { store.selectSafe() }
+                    .buttonStyle(.secondary)
                     .disabled(isMeasuring || store.isCleaning)
             }
         }
@@ -146,8 +146,10 @@ struct OverviewView: View {
         ) {
             if started {
                 Button("Открыть") { onOpenProjects(false) }
+                    .buttonStyle(.secondary)
             } else {
                 Button("Найти") { onOpenProjects(true) }
+                    .buttonStyle(.secondary)
             }
         }
     }
@@ -164,6 +166,7 @@ struct OverviewView: View {
             Button(showCaution ? "Скрыть" : "Показать") {
                 withAnimation(.snappy(duration: 0.2)) { showCaution.toggle() }
             }
+            .buttonStyle(.secondary)
         }
     }
 

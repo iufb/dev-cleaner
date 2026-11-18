@@ -5,7 +5,6 @@ import SwiftUI
 struct SelectionBar: View {
     let summary: String
     let actionTitle: String
-    var destructive = false
     var busy = false
     var disabled = false
     let onClear: () -> Void
@@ -22,7 +21,7 @@ struct SelectionBar: View {
                 .padding(.leading, busy ? 0 : 4)
 
             Button("Снять выбор", action: onClear)
-                .buttonStyle(.borderless)
+                .buttonStyle(.quiet)
                 .disabled(busy)
 
             Button(action: onAction) {
@@ -30,12 +29,10 @@ struct SelectionBar: View {
                     .monospacedDigit()
                     .padding(.horizontal, 4)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(destructive ? .red : .accentColor)
+            .buttonStyle(.primary(.large))
             .keyboardShortcut(.delete, modifiers: .command)
             .disabled(busy || disabled)
         }
-        .controlSize(.large)
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .padding(.vertical, 8)

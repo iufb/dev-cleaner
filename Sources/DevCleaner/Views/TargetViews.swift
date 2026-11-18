@@ -112,6 +112,7 @@ private struct FullDiskAccessBanner: View {
             }
             Spacer()
             Button("Открыть настройки") { FullDiskAccess.openSettings() }
+                .buttonStyle(.secondary)
         }
         .padding(.vertical, 6)
     }
@@ -163,8 +164,7 @@ struct TargetRow: View {
             Menu {
                 actions
             } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(.secondary)
+                MoreMenuLabel()
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

@@ -171,7 +171,6 @@ extension ContentView {
             SelectionBar(
                 summary: "Выбрано \(store.selectedArtifacts.count) · \(Format.bytes(selectedArtifactsSize))",
                 actionTitle: "Удалить…",
-                destructive: true,
                 busy: store.isCleaning,
                 disabled: store.isScanningProjects,
                 onClear: { store.projectSelection = [] },

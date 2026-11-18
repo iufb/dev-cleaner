@@ -28,6 +28,16 @@ struct ProjectsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Артефакты сборки")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                SegmentedControl(selection: $grouping, options: [
+                    (.project, "По проектам"),
+                    (.kind, "По типу"),
+                ])
+                .disabled(!store.didScanProjects)
+                .help("Группировать по проектам или по типу артефакта")
+            }
+        }
     }
 
     // MARK: - Шапка и фильтры
@@ -39,30 +49,29 @@ struct ProjectsView: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             }
+            .buttonStyle(.secondary)
+            .fixedSize()
             .help("Папка, в которой искать проекты: \(store.projectRoot.path)")
 
             if store.didScanProjects && !store.filteredArtifacts.isEmpty {
                 summaryText
+                summary
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            Picker("Группировка", selection: $grouping) {
-                Text("По проектам").tag(CleanerStore.ArtifactGrouping.project)
-                Text("По типу").tag(CleanerStore.ArtifactGrouping.kind)
+            // До первого поиска главное действие — кнопка в пустом состоянии.
+            if store.didScanProjects {
+                Button {
+                    store.scanProjects()
+                } label: {
+                    Label("Заново", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.secondary)
+                .fixedSize()
+                .help(store.isScanningProjects ? "Отменить текущий поиск и начать заново" : "Искать артефакты сборки заново")
+                .disabled(store.isCleaning)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .disabled(!store.didScanProjects)
-
-            Button {
-                store.scanProjects()
-            } label: {
-                Label(store.didScanProjects ? "Искать заново" : "Найти", systemImage: "magnifyingglass")
-            }
-            .help(store.isScanningProjects ? "Отменить текущий поиск и начать заново" : "Искать артефакты сборки")
-            .disabled(store.isCleaning)
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -75,6 +84,7 @@ struct ProjectsView: View {
                 .monospacedDigit()
             Spacer()
             Button("Остановить") { store.cancelProjectScan() }
+                .buttonStyle(.secondary)
         }
         .font(.callout)
         .padding(.horizontal)
@@ -91,32 +101,16 @@ struct ProjectsView: View {
             Text("Не трогали")
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            Picker("Не трогали", selection: $store.minAgeDays) {
-                Text("Любые").tag(0)
-                Text("7+ дн").tag(7)
-                Text("30+ дн").tag(30)
-                Text("90+ дн").tag(90)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            SegmentedControl(selection: $store.minAgeDays, options: [
+                (0, "Любые"),
+                (7, "7+ дн"),
+                (30, "30+ дн"),
+                (90, "90+ дн"),
+            ])
 
-            Menu {
-                Button("Все типы") { store.kindFilter = [] }
-                Divider()
-                ForEach(kinds, id: \.self) { kind in
-                    Toggle(kind, isOn: Binding(
-                        get: { store.kindFilter.contains(kind) },
-                        set: { on in
-                            if on { store.kindFilter.insert(kind) } else { store.kindFilter.remove(kind) }
-                        }
-                    ))
-                }
-            } label: {
-                Text(kindTitle)
+            SelectButton(title: kindTitle) {
+                KindPicker(kinds: kinds)
             }
-            .menuStyle(.button)
-            .fixedSize()
             .disabled(kinds.isEmpty)
 
             if filtersOn {
@@ -124,12 +118,11 @@ struct ProjectsView: View {
                     store.minAgeDays = Self.defaultAge
                     store.kindFilter = []
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.quiet)
+                .fixedSize()
             }
 
-            Spacer()
-
-            summary
+            Spacer(minLength: 0)
         }
         .font(.callout)
         .padding(.horizontal)
@@ -139,9 +132,9 @@ struct ProjectsView: View {
     private var kindTitle: String {
         let chosen = store.kindFilter.sorted()
         switch chosen.count {
-        case 0: return "Тип: все"
-        case 1...2: return "Тип: " + chosen.joined(separator: ", ")
-        default: return "Тип: \(chosen.count)"
+        case 0: return "Все типы"
+        case 1: return chosen[0]
+        default: return Format.count(chosen.count, "тип", "типа", "типов")
         }
     }
 
@@ -152,7 +145,8 @@ struct ProjectsView: View {
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .lineLimit(1)
-            .fixedSize()
+            .truncationMode(.tail)
+            .layoutPriority(-1)
     }
 
     private var summary: some View {
@@ -161,7 +155,7 @@ struct ProjectsView: View {
         return Button(all ? "Снять выбор" : "Выбрать все") {
             store.projectSelection = all ? [] : Set(items.map(\.id))
         }
-        .buttonStyle(.link)
+        .buttonStyle(.quiet)
         .disabled(items.isEmpty)
         .fixedSize()
     }
@@ -179,7 +173,7 @@ struct ProjectsView: View {
                 Text("node_modules, Pods, build, target, .venv и другое в \(Paths.display(store.projectRoot)). Папку можно сменить кнопкой слева сверху.")
             } actions: {
                 Button("Найти артефакты") { store.scanProjects() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.primary(.large))
             }
         } else if store.filteredArtifacts.isEmpty && !store.isScanningProjects {
             ContentUnavailableView("Ничего не найдено",
@@ -338,7 +332,7 @@ private struct ArtifactRow: View {
             Menu {
                 actions
             } label: {
-                Image(systemName: "ellipsis").foregroundStyle(.secondary)
+                MoreMenuLabel()
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -360,5 +354,31 @@ private struct ArtifactRow: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(artifact.url.path, forType: .string)
         }
+    }
+}
+
+/// Всплывающий список типов артефактов с галочками.
+private struct KindPicker: View {
+    let kinds: [String]
+    @Environment(CleanerStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(kinds, id: \.self) { kind in
+                Toggle(kind, isOn: Binding(
+                    get: { store.kindFilter.contains(kind) },
+                    set: { on in
+                        if on { store.kindFilter.insert(kind) } else { store.kindFilter.remove(kind) }
+                    }
+                ))
+                .toggleStyle(.checkbox)
+            }
+            Divider()
+            Button("Все типы") { store.kindFilter = [] }
+                .buttonStyle(.quiet)
+                .disabled(store.kindFilter.isEmpty)
+        }
+        .padding(14)
+        .frame(minWidth: 220, alignment: .leading)
     }
 }

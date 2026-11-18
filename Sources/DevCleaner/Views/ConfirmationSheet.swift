@@ -99,13 +99,10 @@ struct ConfirmationSheet: View {
             HStack(spacing: 10) {
                 Text("Куда")
                     .foregroundStyle(.secondary)
-                Picker("Куда", selection: $useTrash) {
-                    Text("В Корзину").tag(true)
-                    Text("Безвозвратно").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+                SegmentedControl(selection: $useTrash, options: [
+                    (true, "В Корзину"),
+                    (false, "Безвозвратно"),
+                ])
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -121,13 +118,12 @@ struct ConfirmationSheet: View {
                 Spacer()
                 Button("Отмена", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.secondary(.large))
                 Button(confirmTitle(useTrash)) { start() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .tint(useTrash ? .accentColor : .red)
+                    .buttonStyle(useTrash ? .primary(.large) : .destructive(.large))
                     .monospacedDigit()
             }
-            .controlSize(.large)
         }
     }
 
@@ -232,11 +228,11 @@ struct ConfirmationSheet: View {
                     dismiss()
                     onOpenLog()
                 }
+                .buttonStyle(.secondary(.large))
                 Button("Готово") { dismiss() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.primary(.large))
             }
-            .controlSize(.large)
         }
     }
 
