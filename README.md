@@ -10,8 +10,9 @@
 cd DevCleaner
 swift run                 # быстрый запуск
 open Package.swift        # или открыть в Xcode и нажать ⌘R
-./scripts/build-app.sh    # собрать build/DevCleaner.app
+./scripts/build-app.sh    # собрать build/DevCleaner.app (с иконкой)
 swift test                # тесты
+swift scripts/make-icon.swift build/AppIcon.icns   # только иконка
 ```
 
 Приложение не в песочнице: ему нужен доступ к `~/Library`, `~/.gradle` и т. п.

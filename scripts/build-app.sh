@@ -13,6 +13,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/DevCleaner" "$APP/Contents/MacOS/DevCleaner"
 
+# Иконка рисуется из исходника scripts/make-icon.swift.
+swift scripts/make-icon.swift "$APP/Contents/Resources/AppIcon.icns"
+rm -f "$APP/Contents/Resources/AppIcon.png" "$APP/Contents/Resources/AppIcon-small.png"
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -22,6 +26,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>DevCleaner</string>
     <key>CFBundleIdentifier</key><string>local.devcleaner.app</string>
     <key>CFBundleExecutable</key><string>DevCleaner</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>
